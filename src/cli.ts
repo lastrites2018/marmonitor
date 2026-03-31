@@ -1,11 +1,11 @@
-import { spawn } from "node:child_process";
 import { mkdir, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { renderInstallBanner, renderRuntimeBanner } from "./banner/index.js";
+import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
+import { registerCollectorCommands } from "./collector/commands.js";
+import { runStatuslineCommand } from "./collector/statusline.js";
 import {
   getConfigDir,
   getConfigSearchPaths,
@@ -27,27 +27,16 @@ import {
   printStatus,
   printStatusJson,
   printStatusline,
-  renderStatusline,
-  renderUnavailableStatusline,
 } from "./output/index.js";
+import type { StatuslineFormat } from "./output/utils.js";
 import { selectJumpAttentionItem, selectUnmatchedTargets } from "./output/utils.js";
-import { profileAsync } from "./perf.js";
 import { TERMINAL_RESTORE_SEQUENCE, formatProcessFailure } from "./process-safety.js";
 import { detectClaudePhase } from "./scanner/claude.js";
 import { detectCodexPhase, indexCodexSessions, matchCodexSession } from "./scanner/codex.js";
 import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
-import {
-  acquireSnapshotRefreshLock,
-  acquireStatuslineRefreshLock,
-  readCacheFile,
-  releaseSnapshotRefreshLock,
-  releaseStatuslineRefreshLock,
-  snapshotCacheFile,
-  statuslineCacheFile,
-  writeCacheFileAtomically,
-} from "./snapshot-cache.js";
+import { getAgentsSnapshot } from "./snapshot/service.js";
 import { captureTmuxPaneOutput, jumpToAgent, resolveTmuxJumpTarget } from "./tmux/index.js";
 import type { AgentSession } from "./types.js";
 import { VERSION } from "./version.js";
@@ -122,6 +111,7 @@ function buildHelpAppendix(): string {
     "  watch         Live full-screen monitor",
     "  dock          Persistent tmux-friendly monitor",
     "  --statusline  Status bar output for tmux",
+    "  collector     Light snapshot collector lifecycle commands",
     "  clean         Review or kill unmatched leftovers",
     "  debug-phase   Inspect raw phase signals for one PID",
     "  guard         Claude hook evaluator; fail-open on malformed input/errors",
@@ -284,6 +274,8 @@ program
 function resolveConfigPath(opts: { config?: string }): string | undefined {
   return opts.config ?? program.opts<{ config?: string }>().config;
 }
+
+registerCollectorCommands({ program, resolveConfigPath });
 
 function resolveStatuslineWidth(value: string | undefined): number | undefined {
   if (value !== undefined) {
@@ -470,271 +462,6 @@ function resolveAttentionLimit(
   return Math.min(Math.max(Math.floor(fallback), 1), 10);
 }
 
-const SNAPSHOT_LOCK_POLL_MS = 150;
-const STATUSLINE_STALE_FALLBACK_MS = 60_000;
-
-async function readCachedStatusline(
-  format: string,
-  attentionLimit: number,
-  width: number | undefined,
-  ttlMs: number,
-): Promise<string | undefined> {
-  const cached = await readCachedStatuslineEntry(format, attentionLimit, width, ttlMs);
-  return cached?.fresh ? cached.value : undefined;
-}
-
-async function readCachedStatuslineEntry(
-  format: string,
-  attentionLimit: number,
-  width: number | undefined,
-  ttlMs: number,
-): Promise<
-  | {
-      value: string;
-      ageMs: number;
-      fresh: boolean;
-    }
-  | undefined
-> {
-  return await profileAsync("cli", "readCachedStatusline", async () => {
-    const path = statuslineCacheFile(format, attentionLimit, width);
-    const cached = await readCacheFile(path, ttlMs, (raw) => raw.trimEnd());
-    if (!cached) return undefined;
-    return {
-      value: cached.value,
-      ageMs: cached.ageMs,
-      fresh: cached.fresh,
-    };
-  });
-}
-
-async function writeCachedStatusline(
-  format: string,
-  attentionLimit: number,
-  width: number | undefined,
-  value: string,
-): Promise<void> {
-  await profileAsync("cli", "writeCachedStatusline", async () => {
-    const path = statuslineCacheFile(format, attentionLimit, width);
-    try {
-      await mkdir(join(tmpdir(), "marmonitor"), { recursive: true });
-      await writeCacheFileAtomically(path, value);
-    } catch {
-      // cache failures must never break statusline rendering
-    }
-  });
-}
-
-async function readCachedSnapshot(
-  enrichmentMode: "full" | "light",
-  showDead: boolean,
-  ttlMs: number,
-): Promise<AgentSession[] | undefined> {
-  const cached = await readCachedSnapshotEntry(enrichmentMode, showDead, ttlMs);
-  return cached?.fresh ? cached.value : undefined;
-}
-
-async function readCachedSnapshotEntry(
-  enrichmentMode: "full" | "light",
-  showDead: boolean,
-  ttlMs: number,
-): Promise<
-  | {
-      value: AgentSession[];
-      ageMs: number;
-      fresh: boolean;
-    }
-  | undefined
-> {
-  return await profileAsync("snapshot", "readCachedSnapshot", async () => {
-    const path = snapshotCacheFile(enrichmentMode, showDead);
-    const cached = await readCacheFile(path, ttlMs, (raw) => JSON.parse(raw) as AgentSession[]);
-    if (!cached) return undefined;
-    return {
-      value: cached.value,
-      ageMs: cached.ageMs,
-      fresh: cached.fresh,
-    };
-  });
-}
-
-async function writeCachedSnapshot(
-  enrichmentMode: "full" | "light",
-  showDead: boolean,
-  agents: AgentSession[],
-): Promise<void> {
-  await profileAsync("snapshot", "writeCachedSnapshot", async () => {
-    const path = snapshotCacheFile(enrichmentMode, showDead);
-    try {
-      await mkdir(join(tmpdir(), "marmonitor"), { recursive: true });
-      await writeCacheFileAtomically(path, JSON.stringify(agents));
-    } catch {
-      // snapshot cache failures must never break command execution
-    }
-  });
-}
-
-type SnapshotRequestContext = {
-  enrichmentMode: "full" | "light";
-  showDead: boolean;
-  ttlMs: number;
-  useCache: boolean;
-};
-
-type SnapshotScanOptions = {
-  includeTokenUsage?: boolean;
-  includeStdoutHeuristic?: boolean;
-  useSharedRuntimeSnapshots?: boolean;
-  seedSessions?: AgentSession[];
-};
-
-async function readFreshSnapshotIfAvailable(
-  context: SnapshotRequestContext,
-): Promise<AgentSession[] | undefined> {
-  if (!context.useCache) return undefined;
-  return await readCachedSnapshot(context.enrichmentMode, context.showDead, context.ttlMs);
-}
-
-async function acquireSnapshotRefreshLockWithPolling(
-  context: SnapshotRequestContext,
-): Promise<boolean> {
-  if (!context.useCache) return true;
-
-  let acquired = false;
-  let lockUnavailable = false;
-
-  while (!acquired && !lockUnavailable) {
-    const cached = await readFreshSnapshotIfAvailable(context);
-    if (cached) return false;
-
-    try {
-      acquired = await profileAsync("snapshot", "acquireSnapshotRefreshLock", () =>
-        acquireSnapshotRefreshLock(context.enrichmentMode, context.showDead),
-      );
-    } catch {
-      lockUnavailable = true;
-    }
-
-    if (!acquired && !lockUnavailable) {
-      await sleep(SNAPSHOT_LOCK_POLL_MS);
-    }
-  }
-
-  return acquired;
-}
-
-async function scanAndPersistSnapshot(
-  config: Awaited<ReturnType<typeof loadConfig>>,
-  context: SnapshotRequestContext,
-  options: SnapshotScanOptions,
-): Promise<AgentSession[]> {
-  const agents = await profileAsync("snapshot", "scanAgents", () =>
-    scanAgents(config, {
-      enrichmentMode: context.enrichmentMode,
-      includeTokenUsage: options.includeTokenUsage,
-      includeStdoutHeuristic: options.includeStdoutHeuristic,
-      useSharedRuntimeSnapshots: options.useSharedRuntimeSnapshots,
-      seedSessions: options.seedSessions,
-    }),
-  );
-
-  if (context.useCache) {
-    await writeCachedSnapshot(context.enrichmentMode, context.showDead, agents);
-  }
-
-  return agents;
-}
-
-function statuslineStaleMaxMs(ttlMs: number): number {
-  return Math.max(STATUSLINE_STALE_FALLBACK_MS, ttlMs * 6);
-}
-
-function canServeStaleStatusline(ageMs: number, ttlMs: number): boolean {
-  return ageMs <= statuslineStaleMaxMs(ttlMs);
-}
-
-function resolveCliEntrypoint(): string {
-  return (
-    process.argv[1] ?? join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "marmonitor.js")
-  );
-}
-
-async function spawnStatuslineRefreshWorker(params: {
-  format: string;
-  attentionLimit: number;
-  width?: number;
-  configPath?: string;
-}): Promise<boolean> {
-  const acquired = await profileAsync("cli", "acquireStatuslineRefreshLock", () =>
-    acquireStatuslineRefreshLock(params.format, params.attentionLimit, params.width),
-  );
-  if (!acquired) return false;
-
-  const args = [
-    resolveCliEntrypoint(),
-    "--statusline",
-    "--statusline-format",
-    params.format,
-    ...(params.width ? ["--width", String(params.width)] : []),
-    ...(params.configPath ? ["--config", params.configPath] : []),
-  ];
-
-  try {
-    const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        MARMONITOR_STATUSLINE_WORKER: "1",
-      },
-    });
-    child.unref();
-    return true;
-  } catch {
-    await releaseStatuslineRefreshLock(params.format, params.attentionLimit, params.width);
-    return false;
-  }
-}
-
-async function getAgentsSnapshot(
-  config: Awaited<ReturnType<typeof loadConfig>>,
-  options: {
-    enrichmentMode?: "full" | "light";
-    ttlMs?: number;
-    includeTokenUsage?: boolean;
-    includeStdoutHeuristic?: boolean;
-    useSharedRuntimeSnapshots?: boolean;
-    seedSessions?: AgentSession[];
-  } = {},
-): Promise<AgentSession[]> {
-  const ttlMs = options.ttlMs ?? config.performance.snapshotTtlMs;
-  const context: SnapshotRequestContext = {
-    enrichmentMode: options.enrichmentMode ?? "full",
-    showDead: config.display.showDead,
-    ttlMs,
-    useCache: ttlMs > 0,
-  };
-
-  return await profileAsync("snapshot", "getAgentsSnapshot", async () => {
-    const cachedBeforeLock = await readFreshSnapshotIfAvailable(context);
-    if (cachedBeforeLock) return cachedBeforeLock;
-
-    const acquired = await acquireSnapshotRefreshLockWithPolling(context);
-
-    try {
-      const cachedAfterLock = await readFreshSnapshotIfAvailable(context);
-      if (cachedAfterLock) return cachedAfterLock;
-
-      return await scanAndPersistSnapshot(config, context, options);
-    } finally {
-      if (context.useCache && acquired) {
-        await releaseSnapshotRefreshLock(context.enrichmentMode, context.showDead);
-      }
-    }
-  });
-}
-
 program
   .option("--statusline", "One-line summary for tmux statusbar")
   .option(
@@ -745,113 +472,32 @@ program
   .option("--width <n>", "Render width hint for responsive statusline compaction")
   .option("--config <path>", "Path to settings.json")
   .action(async (opts) => {
-    const validFormats = ["compact", "standard", "extended", "tmux-badges", "wezterm-pills"];
+    const validFormats: StatuslineFormat[] = [
+      "compact",
+      "standard",
+      "extended",
+      "tmux-badges",
+      "wezterm-pills",
+    ];
     if (opts.statuslineFormat && !validFormats.includes(opts.statuslineFormat)) {
       console.error(`Invalid format: ${opts.statuslineFormat}. Valid: ${validFormats.join(", ")}`);
       process.exit(1);
     }
     if (opts.statusline) {
-      const isRefreshWorker = process.env.MARMONITOR_STATUSLINE_WORKER === "1";
       const width = resolveStatuslineWidth(opts.width);
-      let attentionLimit = 5;
-      try {
-        const config = await loadConfig(resolveConfigPath(opts));
-        if (opts.statuslineFormat === "wezterm-pills") {
-          console.error("wezterm-pills is paused. Use tmux-badges or another tmux format.");
-          process.exit(1);
-        }
-        attentionLimit = config.display.statuslineAttentionLimit;
-        const statuslineCache = await readCachedStatuslineEntry(
-          opts.statuslineFormat,
-          attentionLimit,
-          width,
-          config.performance.statuslineTtlMs,
-        );
-        if (statuslineCache?.fresh) {
-          console.log(statuslineCache.value);
-          return;
-        }
-
-        if (
-          !isRefreshWorker &&
-          statuslineCache &&
-          !statuslineCache.fresh &&
-          canServeStaleStatusline(statuslineCache.ageMs, config.performance.statuslineTtlMs)
-        ) {
-          await spawnStatuslineRefreshWorker({
-            format: opts.statuslineFormat,
-            attentionLimit,
-            width,
-            configPath: opts.config,
-          });
-          console.log(statuslineCache.value);
-          return;
-        }
-
-        const snapshotCache = await readCachedSnapshotEntry(
-          "light",
-          config.display.showDead,
-          config.performance.snapshotTtlMs,
-        );
-        if (snapshotCache?.fresh) {
-          const rendered = await renderStatusline(
-            snapshotCache.value,
-            opts.statuslineFormat,
-            attentionLimit,
-            width,
-          );
-          await writeCachedStatusline(opts.statuslineFormat, attentionLimit, width, rendered);
-          console.log(rendered);
-          return;
-        }
-
-        if (!isRefreshWorker) {
-          if (
-            snapshotCache &&
-            !snapshotCache.fresh &&
-            canServeStaleStatusline(snapshotCache.ageMs, config.performance.snapshotTtlMs)
-          ) {
-            await spawnStatuslineRefreshWorker({
-              format: opts.statuslineFormat,
-              attentionLimit,
-              width,
-              configPath: opts.config,
-            });
-            console.log(
-              await renderStatusline(
-                snapshotCache.value,
-                opts.statuslineFormat,
-                attentionLimit,
-                width,
-              ),
-            );
-            return;
-          }
-        }
-
-        const agents = await getAgentsSnapshot(config, {
-          enrichmentMode: "light",
-          includeStdoutHeuristic: true,
-          useSharedRuntimeSnapshots: true,
-          seedSessions: snapshotCache?.value,
-        });
-        const rendered = await renderStatusline(
-          agents,
-          opts.statuslineFormat,
-          attentionLimit,
-          width,
-        );
-        await writeCachedStatusline(opts.statuslineFormat, attentionLimit, width, rendered);
-        console.log(rendered);
-        return;
-      } catch {
-        console.log(renderUnavailableStatusline(opts.statuslineFormat));
-        return;
-      } finally {
-        if (isRefreshWorker) {
-          await releaseStatuslineRefreshLock(opts.statuslineFormat, attentionLimit, width);
-        }
+      const format = opts.statuslineFormat as StatuslineFormat;
+      if (format === "wezterm-pills") {
+        console.error("wezterm-pills is paused. Use tmux-badges or another tmux format.");
+        process.exit(1);
       }
+      console.log(
+        await runStatuslineCommand({
+          format,
+          width,
+          configPath: resolveConfigPath(opts),
+        }),
+      );
+      return;
     }
     console.log("TUI dashboard not yet implemented. Use 'marmonitor status' for now.");
   });
@@ -895,11 +541,17 @@ program
   .option("--limit <n>", "Max items to show", "12")
   .option("--config <path>", "Path to settings.json")
   .action(async (opts) => {
-    const config = await loadConfig(resolveConfigPath(opts));
-    const agents = await getAgentsSnapshot(config, {
-      enrichmentMode: "light",
-      includeStdoutHeuristic: true,
-    });
+    const requestedConfigPath = resolveLoadedConfigPath(resolveConfigPath(opts));
+    const config = await loadConfig(requestedConfigPath);
+    const agents =
+      (await readHealthyCollectorSnapshotForRequest({
+        config,
+        requestedConfigPath,
+      })) ??
+      (await getAgentsSnapshot(config, {
+        enrichmentMode: "light",
+        includeStdoutHeuristic: true,
+      }));
     const limit = resolveAttentionLimit(opts, config.display.attentionLimit);
     const interactiveLimit = resolveAttentionLimit(opts, config.display.attentionLimit, true);
     if (opts.interactive && opts.json) {
@@ -1097,11 +749,17 @@ program
   .option("--json", "Output as JSON")
   .option("--config <path>", "Path to settings.json")
   .action(async (opts) => {
-    const config = await loadConfig(resolveConfigPath(opts));
-    const agents = await getAgentsSnapshot(config, {
-      enrichmentMode: "light",
-      includeStdoutHeuristic: true,
-    });
+    const requestedConfigPath = resolveLoadedConfigPath(resolveConfigPath(opts));
+    const config = await loadConfig(requestedConfigPath);
+    const agents =
+      (await readHealthyCollectorSnapshotForRequest({
+        config,
+        requestedConfigPath,
+      })) ??
+      (await getAgentsSnapshot(config, {
+        enrichmentMode: "light",
+        includeStdoutHeuristic: true,
+      }));
     const useAttention = Boolean(opts.attention);
     const useAttentionIndex = typeof opts.attentionIndex === "string";
     const usePid = typeof opts.pid === "string";

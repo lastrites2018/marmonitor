@@ -41,6 +41,8 @@ marmonitor 성능 개선 실행 계획
 - [완료] 3. shared snapshot + single-flight
 - [진행 중] 4. Codex / Claude 세션 조회 축소
 - [대기] 5. tmux 실측 검증
+- [다음 단계] 6. collector 전환 설계 및 구현
+  - 세부 계획은 [`docs/marmonitor-collector-plan.txt`](./marmonitor-collector-plan.txt)에 정리한다.
 
 1. 계측 추가
 - `MARMONITOR_PERF=1`일 때만 stderr로 timing JSON을 출력한다.
@@ -162,3 +164,16 @@ marmonitor 성능 개선 실행 계획
 - 2026-03-31: `scripts/bench-codex-index.mjs`와 `scripts/bench-statusline-live.mjs`를 추가해 benchmark를 코드로 재현 가능하게 만들었다.
 - 2026-03-31: benchmark 출력에는 current/baseline commit, CPU, RAM, tmux sessions/panes, agent count, TTL을 함께 남기도록 정리했다.
 - 2026-03-31: `statusline live` benchmark는 `status --json`이 `{ system, agents }` 형태를 반환해도 agent count를 정확히 읽도록 보정했다.
+- 2026-03-31: 다음 구조 단계는 collector 전환으로 정리했다. 기준 문서는 `Simple Made Easy`이며, `scan`, `collector workflow`, `artifact store`, `statusline serve`를 서로 다른 변경 이유로 분리한다.
+- 2026-03-31: collector 1차 범위는 `light snapshot + statusline serve`로 제한한다. full snapshot, multi-user daemon, system integration은 후순위로 둔다.
+- 2026-03-31: collector 1차 구현을 시작했다. `collector health`, `collector snapshot`, `collector run/status/stop` 명령을 추가했다.
+- 2026-03-31: collector가 healthy일 때 `--statusline` foreground 경로는 collector snapshot만 읽고 render하도록 연결했다. sequential 검증에서 perf 출력은 `collector.readHealth`, `collector.readSnapshot`, `output.renderStatusline`만 남았고 `scanAgents`는 사라졌다.
+- 2026-03-31: `collector start`를 추가하고, healthy collector가 없을 때 `--statusline`은 best-effort lazy-start를 시도하도록 연결했다.
+- 2026-03-31: `attention`과 `jump`도 healthy collector light snapshot을 우선 재사용하도록 바꿨다.
+- 2026-03-31: `scripts/bench-statusline-live.mjs --collector-mode collector`를 추가했고, 현재 예시 측정에서는 cold `85.7ms`, warm `85.1ms`, stale `88.3ms`, forced-miss `79.3ms`로 foreground 경로가 collector read + render 중심으로 수렴했다.
+- 2026-03-31: collector가 light snapshot뿐 아니라 pre-rendered statusline text도 권위 artifact로 갖도록 확장했다. foreground `--statusline`은 healthy collector가 있으면 `renderStatusline()`도 수행하지 않는다.
+- 2026-03-31: collector health에 `configPath`, `snapshotTtlMs`, `statuslineTtlMs`, `statuslineAttentionLimit`를 기록해, collector healthy + config 일치 시 `--statusline`이 config load 없이 `health.json + statusline-*.txt`만 읽도록 줄였다.
+- 2026-03-31: `attention`/`jump`의 collector snapshot 재사용도 config path 일치 조건을 보도록 보강했다. 다른 config로 떠 있는 collector artifact를 잘못 재사용하지 않는다.
+- 2026-03-31: `collector stop`은 signal 전송 뒤 health artifact도 같이 제거하도록 바꿨다. 명시적으로 stop한 뒤에도 잠깐 healthy로 보이는 상태를 없앴다.
+- 2026-03-31: `scripts/bench-statusline-live.mjs`는 시작/종료 시 detached collector를 best-effort로 정리해 bench 실행끼리 서로 영향을 주지 않게 했다.
+- 2026-03-31: 최신 collector-mode 예시 측정에서는 cold `51.4ms`, warm `50.8ms`, stale `54.7ms`, forced-miss `54.8ms`를 확인했다. 실제 perf 출력도 `collector.readHealth`, `collector.readStatusline`만 남아 foreground가 file-read 경로로 수렴했다.

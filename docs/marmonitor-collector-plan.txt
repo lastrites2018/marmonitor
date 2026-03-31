@@ -1,0 +1,264 @@
+marmonitor collector 전환 계획
+
+목적
+- tmux statusline foreground 경로에서 scan / refresh / render / lock orchestration이 한 CLI 실행 안에 엮여 있는 구조를 끊는다.
+- collector를 도입해 "수집"과 "서빙"의 변경 이유를 분리한다.
+- 이후 구현과 리팩터링 판단의 기준은 `simple-made-easy-global-merged-v3.3.md`의 핵심 질문으로 둔다.
+  - 독립적이어야 할 것들이 분리 불가능하게 엮여 있는가.
+
+현재 판단
+- 지금 `--statusline`은 SWR 덕분에 steady state foreground latency가 약 50ms 수준까지 내려왔다.
+- 하지만 여전히 아래 관심사가 한 CLI 경로에 같이 들어 있다.
+  - statusline 요청 처리
+  - stale/fresh cache 판정
+  - refresh worker spawn
+  - snapshot scan orchestration
+  - output rendering
+- 이 구조는 "입력 경로 서빙"과 "배경 수집"의 변경 이유가 다름에도 같은 모듈과 같은 제어 흐름 안에 머문다.
+
+simple made easy 기준 적용
+- 수집기는 외부 시스템을 동기화하는 부수효과 계층이다.
+  - 대상: OS process table, pidusage, tmux, JSONL, 파일시스템
+- light snapshot은 외부 데이터 캐시다.
+  - collector가 소유하는 단일 원천이다.
+- statusline 문자열은 파생값이다.
+  - 권위 원본이 아니고, snapshot에서 계산 가능한 값이다.
+  - 필요하면 성능을 위한 파생 캐시로만 저장한다.
+- collector lifecycle은 워크플로 상태다.
+  - stopped / starting / refreshing / idle / degraded 같은 명시적 전환으로 격리한다.
+- CLI는 표현과 진입점 역할만 맡는다.
+  - collector가 건강하면 읽기만 한다.
+  - collector가 비정상이면 fallback 경로를 탄다.
+
+설계 원칙
+1. 단일 원천
+- collector light snapshot이 statusline용 권위 원본이다.
+- statusline text 파일은 snapshot에서 파생되는 discardable cache다.
+- 같은 정보를 snapshot과 별도 domain store에 이중 저장하지 않는다.
+
+2. 부수효과 경계
+- process scan, tmux resolve, JSONL parse, 파일 쓰기, timer는 collector 내부 경계에만 둔다.
+- renderStatusline, snapshot 요약, health 판정은 순수 함수로 유지한다.
+
+3. 워크플로 상태 격리
+- "언제 refresh할지", "실패 후 backoff할지", "health를 unhealthy로 볼지"는 collector 상태 머신이 담당한다.
+- scanner나 renderer가 timer/backoff/lock 정책을 알면 안 된다.
+
+4. 파생값은 계산 우선
+- statusline summary, focus text, alert count, health badge는 snapshot에서 매번 계산 가능한 값이다.
+- 성능상 필요할 때만 pre-rendered file을 캐시한다.
+
+5. fallback은 보존
+- collector가 죽었거나 너무 오래 stale이면 현재 CLI SWR 경로로 즉시 폴백한다.
+- collector 도입은 기존 경로를 제거하는 작업이 아니라, foreground에서 비싼 경로를 분리하는 작업이다.
+
+1차 아키텍처
+
+구성요소
+1. scanner
+- 책임: 현재 실행 중인 agent 상태를 읽어 light/full snapshot을 만든다.
+- 입력: config, runtime paths, optional seed sessions
+- 출력: `AgentSession[]`
+- 비책임: timer, daemon lifecycle, health, client serve
+
+2. collector store
+- 책임: collector artifact의 읽기/쓰기와 atomic persistence
+- 입력/출력 파일
+  - `health.json`
+  - `snapshot-light.json`
+  - `statusline-*.txt`
+- 비책임: scan 정책, render 정책
+
+3. collector loop
+- 책임: 주기 실행, refresh 직렬화, 실패 backoff, health 갱신
+- 내부 상태
+  - `stopped`
+  - `starting`
+  - `refreshing`
+  - `idle`
+  - `degraded`
+- 비책임: statusline 포맷팅 세부 규칙
+
+4. statusline renderer
+- 책임: snapshot -> statusline string 순수 변환
+- 입력: light snapshot, format, attention limit, width
+- 출력: string
+
+5. cli client
+- 책임: collector artifact를 읽고 출력한다.
+- collector가 건강하면:
+  - statusline text 또는 snapshot을 읽어 즉시 출력
+- collector가 비정상이면:
+  - 현재 SWR fallback 경로 사용
+
+파일 경계 제안
+- `src/collector/model.ts`
+  - health 타입
+  - collector state 타입
+  - freshness 판정 순수 함수
+  - refresh interval 계산 순수 함수
+- `src/collector/store.ts`
+  - artifact path 계산
+  - health/snapshot/statusline read/write
+  - atomic write
+- `src/collector/render.ts`
+  - light snapshot -> statusline text
+  - 여러 format 출력 생성
+- `src/collector/loop.ts`
+  - foreground collector main loop
+  - single-flight refresh
+  - backoff
+- `src/collector/commands.ts`
+  - `collector run`
+  - `collector status`
+  - `collector stop`
+- 기존 `src/cli.ts`
+  - statusline 서빙 진입점만 유지
+  - collector health 확인 후 read-only serve
+  - fallback 경로는 기존 SWR 재사용
+
+artifact 모델
+- root: `TMPDIR/marmonitor/collector`
+- `health.json`
+  - `pid`
+  - `startedAt`
+  - `lastTickAt`
+  - `lastSuccessAt`
+  - `lastErrorAt`
+  - `state`
+  - `version`
+  - `snapshotGeneratedAt`
+- `snapshot-light.json`
+  - collector가 만든 light snapshot 전체
+  - statusline의 단일 원천
+- `statusline-{format}-{attentionLimit}-{width}.txt`
+  - optional derived cache
+  - snapshot에서 언제든 재생성 가능
+
+왜 file-backed collector로 시작하는가
+- socket/IPC server보다 단순하다.
+- 디버깅이 쉽다.
+  - 파일과 JSON만 보면 된다.
+- 현재 cache/lock 기반 구조를 대부분 재사용할 수 있다.
+- collector가 망가져도 기존 CLI fallback 경로가 살아 있다.
+
+왜 1차에서 full snapshot은 collector에 넣지 않는가
+- 지금 목표는 statusline foreground latency 분리다.
+- full snapshot까지 collector가 소유하면 변경 이유가 늘어난다.
+- 1차는 light snapshot + statusline serve만 분리하고, `status`, `attention`, `jump`는 현 경로를 유지한다.
+
+단계별 구현 계획
+
+1단계. collector artifact 경계 추출
+- 목표
+  - statusline 전용 read/write path를 `src/cli.ts`에서 분리한다.
+- 작업
+  - snapshot/statusline cache helper를 `collector/store` 개념으로 재배치한다.
+  - 현재 `statusline` SWR 경로가 읽는 데이터 계약을 명시한다.
+- 완료 기준
+  - CLI는 "어디서 읽는지"만 알고, 파일명/health 계산 세부를 모른다.
+
+2단계. foreground collector 실행기 추가
+- 목표
+  - `marmonitor collector run --foreground`가 light snapshot과 statusline artifact를 주기적으로 갱신한다.
+- 작업
+  - health file 생성
+  - light snapshot refresh loop
+  - format별 statusline pre-render
+  - refresh lock 재사용
+- 완료 기준
+  - collector 단독 실행만으로 statusline artifact가 계속 갱신된다.
+
+3단계. statusline client read-only 경로 추가
+- 목표
+  - `--statusline`이 collector health가 좋으면 scan하지 않고 artifact만 읽는다.
+- 작업
+  - health freshness 판정
+  - statusline text 우선
+  - text가 없으면 snapshot을 읽고 즉석 render
+  - collector unhealthy 시 현재 SWR fallback
+- 완료 기준
+  - collector 정상 시 foreground statusline은 scan을 수행하지 않는다.
+
+4단계. lazy-start와 운영 진입점 추가
+- 목표
+  - 사용자가 collector를 명시적으로 켜지 않아도 쓸 수 있게 한다.
+- 작업
+  - `collector start`
+  - stale health 감지 시 lazy-start 옵션
+  - `collector stop`, `collector status`
+- 완료 기준
+  - 단일 사용자 환경에서 collector 운영이 수동 작업에 묶이지 않는다.
+
+5단계. refresh 정책 분리
+- 목표
+  - collector loop의 정책과 scan 자체를 분리한다.
+- 작업
+  - idle vs active interval 분리
+  - error backoff
+  - forced refresh trigger 설계
+- 완료 기준
+  - refresh 정책 변경이 scanner/renderer를 흔들지 않는다.
+
+6단계. 범위 확장 여부 판단
+- 후보
+  - attention/jump도 collector snapshot reuse
+  - full snapshot collector화
+- 원칙
+  - statusline 문제가 해결된 뒤에만 확장한다.
+  - "추가 가능"과 "같이 넣어야 함"을 구분한다.
+
+테스트 계획
+- 단위 테스트
+  - health freshness 판정
+  - statusline artifact 선택 규칙
+  - collector state 전환
+  - stale/unhealthy fallback
+- 통합 테스트
+  - foreground collector run 후 artifact 생성 확인
+  - collector healthy 상태에서 `--statusline`이 scan 없이 파일만 읽는지 확인
+  - collector unhealthy 상태에서 기존 SWR fallback이 유지되는지 확인
+- benchmark
+  - 기존 `scripts/bench-statusline-live.mjs`에 collector on/off 비교 추가
+  - 기대 결과
+    - cold path는 collector 쪽으로 이동
+    - foreground statusline은 현재 50ms대보다 더 낮고 변동폭이 작아진다
+
+코딩 규칙
+- 새 코드가 들어갈 때마다 먼저 적는다.
+  - 이 값은 원본 상태인가, 파생값인가.
+  - 이 모듈의 변경 이유는 하나인가.
+  - 이 부수효과의 대상은 무엇인가.
+- collector 내부에서도 하나의 함수가 scan, render, write, health update를 동시에 하지 않게 나눈다.
+- `statusline text`는 파생 캐시라는 점을 코드와 테스트 이름에서 드러낸다.
+- fallback 경로를 collector 성공 경로와 섞지 않는다.
+
+이번 전환에서 의도적으로 하지 않는 것
+- socket 기반 장기 연결
+- multi-user daemon
+- systemd/launchd 의존
+- full snapshot을 collector 단일 원천으로 바꾸는 작업
+- 기존 SWR 경로 제거
+
+성공 판단
+- collector가 healthy일 때 `--statusline` foreground 경로에서 `scanAgents`가 사라진다.
+- foreground latency가 지금의 약 50ms보다 더 낮아지거나, 최소한 jitter가 더 작아진다.
+- collector가 죽어도 기존 CLI 경로로 안전하게 폴백한다.
+- collector loop, artifact store, renderer, CLI serve가 서로의 내부 구현을 직접 알지 않는다.
+
+작업 로그
+- 2026-03-31: 1차 구조 리팩터링으로 `src/collector/model.ts`, `src/collector/store.ts`, `src/collector/statusline.ts`, `src/snapshot/service.ts`를 추가했다.
+- 2026-03-31: `statusline` serve 정책은 순수 함수 `decideStatuslineServe()`로 분리했고, CLI는 정책/scan 세부를 직접 알지 않도록 정리했다.
+- 2026-03-31: snapshot cache + scan orchestration은 `getAgentsSnapshot()` 서비스로 이동했다.
+- 2026-03-31: 회귀 테스트로 `tests/collector-model.test.mjs`를 추가했고, 전체 `build/lint/test`를 재통과했다.
+- 2026-03-31: `collector run --once`, `collector status`, `collector stop` 명령을 추가했다.
+- 2026-03-31: `collector start`를 추가하고, start 명령은 healthy health가 확인될 때까지 짧게 polling 하도록 보강했다.
+- 2026-03-31: collector는 `health.json`과 `snapshot-light.json`을 `TMPDIR/marmonitor/collector` 아래에 쓴다.
+- 2026-03-31: collector가 healthy일 때 `--statusline` foreground 경로는 collector snapshot만 읽고 render하며, 실제 `MARMONITOR_PERF` 출력에서도 `scanAgents` 없이 `collector.readHealth/readSnapshot + output.renderStatusline`만 남는 것을 확인했다.
+- 2026-03-31: `attention`과 `jump`도 collector light snapshot을 우선 재사용하도록 연결했다.
+- 2026-03-31: `scripts/bench-statusline-live.mjs`는 `--collector-mode direct|collector`를 받아 collector 경로를 별도 측정할 수 있게 했다.
+- 2026-03-31: collector는 format별 pre-rendered statusline text도 artifact로 저장하도록 확장했다. healthy collector가 있으면 foreground `--statusline`은 snapshot render 대신 text artifact를 바로 반환한다.
+- 2026-03-31: collector health는 workflow 상태뿐 아니라 `configPath`, `snapshotTtlMs`, `statuslineTtlMs`, `statuslineAttentionLimit`도 함께 기록한다. 이 metadata로 foreground client는 config를 다시 읽지 않고도 serve 가능 여부를 판정한다.
+- 2026-03-31: `--statusline` fast path는 이제 `resolveConfigPath()` 결과와 collector health의 `configPath`를 맞춰 본 뒤, 일치할 때만 collector artifact를 읽는다. config가 다르면 기존 fallback 경로로 내려간다.
+- 2026-03-31: `collector stop`은 signal 전송과 함께 health artifact도 제거해 explicit stop 직후 stale healthy 상태가 남지 않게 정리했다.
+- 2026-03-31: 최신 sequential 검증에서 healthy collector가 있는 `--statusline` perf 출력은 `collector.readHealth`와 `collector.readStatusline`만 남았고, `scanAgents`, `renderStatusline`, local SWR cache read는 foreground hot path에서 빠졌다.

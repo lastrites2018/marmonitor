@@ -128,6 +128,28 @@ async function runMarmonitor(args, env = {}) {
   });
 }
 
+async function runCollectorOnce(configPath, interval = "2") {
+  await runMarmonitor(
+    [
+      "collector",
+      "run",
+      "--once",
+      "--interval",
+      interval,
+      ...(configPath ? ["--config", configPath] : []),
+    ],
+    {},
+  );
+}
+
+async function stopCollectorBestEffort() {
+  try {
+    await runMarmonitor(["collector", "stop"], {});
+  } catch {
+    // best effort only
+  }
+}
+
 async function clearAllCaches() {
   await rm(cacheRoot, { recursive: true, force: true });
   await mkdir(cacheRoot, { recursive: true });
@@ -185,6 +207,9 @@ async function collectAgentCount(configPath) {
 }
 
 function printHumanSummary(summary) {
+  if (summary.mode) {
+    console.log(`mode: ${summary.mode}`);
+  }
   console.log("Statusline live benchmark");
   console.log(`current: ${summary.environment.currentCommit ?? "(unknown)"}`);
   if (summary.environment.baselineCommit) {
@@ -225,6 +250,7 @@ async function main() {
       json: { type: "boolean", default: false },
       "forced-runs": { type: "string", default: "2" },
       "baseline-ref": { type: "string", default: "origin/main" },
+      "collector-mode": { type: "string", default: "direct" },
     },
     allowPositionals: false,
   });
@@ -236,6 +262,10 @@ async function main() {
 
   const configPath = values.config ? String(values.config) : undefined;
   const config = await loadConfig(configPath);
+  const collectorMode = String(values["collector-mode"]);
+  if (!["direct", "collector"].includes(collectorMode)) {
+    throw new Error(`Invalid --collector-mode value: ${collectorMode}`);
+  }
   const statuslineArgs = [
     "--statusline",
     "--statusline-format",
@@ -244,60 +274,75 @@ async function main() {
     ...(configPath ? ["--config", configPath] : []),
   ];
 
-  await clearAllCaches();
-  const cold = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
-  const warm = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+  try {
+    await stopCollectorBestEffort();
+    await clearAllCaches();
+    if (collectorMode === "collector") {
+      await runCollectorOnce(configPath);
+    }
+    const cold = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+    const warm = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
 
-  const forcedMiss = [];
-  for (let i = 0; i < forcedRuns; i += 1) {
-    await clearSnapshotArtifacts();
-    const measurement = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
-    forcedMiss.push(parsePerf(measurement.stderr, measurement.durationMs));
+    const forcedMiss = [];
+    for (let i = 0; i < forcedRuns; i += 1) {
+      await clearSnapshotArtifacts();
+      if (collectorMode === "collector") {
+        await runCollectorOnce(configPath);
+      }
+      const measurement = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+      forcedMiss.push(parsePerf(measurement.stderr, measurement.durationMs));
+    }
+
+    await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+    await ageSnapshotArtifacts(
+      Math.max(config.performance.snapshotTtlMs, config.performance.statuslineTtlMs) + 1_000,
+    );
+    if (collectorMode === "collector") {
+      await runCollectorOnce(configPath);
+    }
+    const staleServed = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+
+    const tmuxSessions = await getTmuxMetric(["ls"]);
+    const tmuxPanes = await getTmuxMetric(["list-panes", "-a"]);
+    const agentCount = await collectAgentCount(configPath);
+
+    const summary = {
+      mode: collectorMode,
+      environment: {
+        currentCommit: await getGitValue(["rev-parse", "HEAD"]),
+        baselineCommit: await getGitValue(["rev-parse", String(values["baseline-ref"])]),
+        node: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        cpuModel: os.cpus()[0]?.model ?? "unknown",
+        logicalCpuCount: os.cpus().length,
+        totalMemoryGb: Number((os.totalmem() / 1024 ** 3).toFixed(1)),
+        tmuxSessionCount: tmuxSessions.error ? null : tmuxSessions.items.length,
+        tmuxPaneCount: tmuxPanes.error ? null : tmuxPanes.items.length,
+        tmuxError: tmuxSessions.error ?? tmuxPanes.error,
+        agentCount: agentCount.count ?? null,
+        agentCountError: agentCount.error,
+        snapshotTtlMs: config.performance.snapshotTtlMs,
+        statuslineTtlMs: config.performance.statuslineTtlMs,
+        stdoutHeuristicTtlMs: config.performance.stdoutHeuristicTtlMs,
+      },
+      measurements: {
+        cold: parsePerf(cold.stderr, cold.durationMs),
+        warm: parsePerf(warm.stderr, warm.durationMs),
+        staleServed: parsePerf(staleServed.stderr, staleServed.durationMs),
+        forcedMiss,
+      },
+    };
+
+    if (values.json) {
+      console.log(JSON.stringify(summary, null, 2));
+      return;
+    }
+
+    printHumanSummary(summary);
+  } finally {
+    await stopCollectorBestEffort();
   }
-
-  await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
-  await ageSnapshotArtifacts(
-    Math.max(config.performance.snapshotTtlMs, config.performance.statuslineTtlMs) + 1_000,
-  );
-  const staleServed = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
-
-  const tmuxSessions = await getTmuxMetric(["ls"]);
-  const tmuxPanes = await getTmuxMetric(["list-panes", "-a"]);
-  const agentCount = await collectAgentCount(configPath);
-
-  const summary = {
-    environment: {
-      currentCommit: await getGitValue(["rev-parse", "HEAD"]),
-      baselineCommit: await getGitValue(["rev-parse", String(values["baseline-ref"])]),
-      node: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      cpuModel: os.cpus()[0]?.model ?? "unknown",
-      logicalCpuCount: os.cpus().length,
-      totalMemoryGb: Number((os.totalmem() / 1024 ** 3).toFixed(1)),
-      tmuxSessionCount: tmuxSessions.error ? null : tmuxSessions.items.length,
-      tmuxPaneCount: tmuxPanes.error ? null : tmuxPanes.items.length,
-      tmuxError: tmuxSessions.error ?? tmuxPanes.error,
-      agentCount: agentCount.count ?? null,
-      agentCountError: agentCount.error,
-      snapshotTtlMs: config.performance.snapshotTtlMs,
-      statuslineTtlMs: config.performance.statuslineTtlMs,
-      stdoutHeuristicTtlMs: config.performance.stdoutHeuristicTtlMs,
-    },
-    measurements: {
-      cold: parsePerf(cold.stderr, cold.durationMs),
-      warm: parsePerf(warm.stderr, warm.durationMs),
-      staleServed: parsePerf(staleServed.stderr, staleServed.durationMs),
-      forcedMiss,
-    },
-  };
-
-  if (values.json) {
-    console.log(JSON.stringify(summary, null, 2));
-    return;
-  }
-
-  printHumanSummary(summary);
 }
 
 main().catch((error) => {

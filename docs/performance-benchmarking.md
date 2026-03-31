@@ -38,6 +38,7 @@
 - 명령
   - `npm run bench:statusline-live`
 - JSON 출력: `npm run bench:statusline-live -- --json`
+- collector 경로 측정: `npm run bench:statusline-live -- --json --collector-mode collector`
 - 스크립트
   - [`scripts/bench-statusline-live.mjs`](../scripts/bench-statusline-live.mjs)
 - 기본 동작
@@ -52,6 +53,9 @@
   - 현재 agent 수
   - runtime config에서 읽은 TTL 값
   - `MARMONITOR_PERF` 단계별 timing
+- collector mode
+  - `direct`: 현재 CLI/SWR 경로를 측정한다.
+  - `collector`: 각 시나리오 전에 `collector run --once`로 artifact를 만든 뒤 foreground serve 경로를 측정한다.
 
 현재 예시 측정
 - synthetic benchmark
@@ -75,6 +79,17 @@
     - `cold`: `1413.3ms`
     - `warm`: `66.1ms`
     - `forced-miss`: `550.1ms`, `118.4ms`
+- live statusline benchmark, collector mode
+  - 측정 명령: `node scripts/bench-statusline-live.mjs --json --collector-mode collector --forced-runs 1`
+  - host: `Apple M3 Max`, `14` logical CPU, `36GB RAM`
+  - 결과 요약
+    - `cold`: `51.4ms`
+    - `warm`: `50.8ms`
+    - `stale-served`: `54.7ms`
+    - `forced-miss`: `54.8ms`
+  - 해석
+    - collector health에 config path / TTL / attentionLimit를 함께 기록해 foreground `--statusline`이 config load 없이 `health.json + pre-rendered statusline text`만 읽도록 줄였다.
+    - benchmark는 시작/종료 시 detached collector를 정리해 이전 세션이 측정값을 오염시키지 않게 한다.
 
 검토 순서
 1. `npm run bench:codex-index -- --json`로 fixture 기반 숫자를 캡처한다.
