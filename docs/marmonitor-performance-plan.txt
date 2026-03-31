@@ -177,3 +177,12 @@ marmonitor 성능 개선 실행 계획
 - 2026-03-31: `collector stop`은 signal 전송 뒤 health artifact도 같이 제거하도록 바꿨다. 명시적으로 stop한 뒤에도 잠깐 healthy로 보이는 상태를 없앴다.
 - 2026-03-31: `scripts/bench-statusline-live.mjs`는 시작/종료 시 detached collector를 best-effort로 정리해 bench 실행끼리 서로 영향을 주지 않게 했다.
 - 2026-03-31: 최신 collector-mode 예시 측정에서는 cold `51.4ms`, warm `50.8ms`, stale `54.7ms`, forced-miss `54.8ms`를 확인했다. 실제 perf 출력도 `collector.readHealth`, `collector.readStatusline`만 남아 foreground가 file-read 경로로 수렴했다.
+- 2026-03-31: `src/statusline-client.ts`와 `bin/marmonitor-statusline.js`를 추가해 statusline 전용 thin client를 분리했다. 이 경로는 commander를 로드하지 않고 `--statusline` serve만 담당한다.
+- 2026-03-31: 기존 `bin/marmonitor.js`도 `--statusline` 호출이면 thin client로 우회하도록 바꿨다. tmux 설정을 바꾸지 않아도 bootstrap 비용 절감 효과를 바로 얻는다.
+- 2026-03-31: statusline refresh worker는 main CLI가 아니라 statusline 전용 entrypoint를 사용하도록 분리했다. 반대로 detached collector start는 항상 main CLI entrypoint를 사용하도록 고정했다.
+- 2026-03-31: collector loop는 tick마다 config를 다시 읽도록 바꿨다. foreground serve와 별개로 config source를 collector workflow에서 분리했다.
+- 2026-03-31: `tests/statusline-client.test.mjs`를 추가해 main wrapper와 thin statusline binary가 collector text artifact를 직접 서빙하는 경로를 회귀 테스트로 고정했다.
+- 2026-03-31: 최신 측정에서 direct mode는 cold `2063.2ms`, warm `51.5ms`, stale `46.2ms`, forced-miss `46.4ms`였고, collector mode는 cold `48.0ms`, warm `44.6ms`, stale `54.3ms`, forced-miss `48.2ms`였다.
+- 2026-04-01: width-sensitive statusline은 exact width artifact가 없을 때만 collector snapshot에서 한 번 렌더하고, 그 결과를 `statusline-{format}-{attentionLimit}-{width}.txt`로 materialize하도록 바꿨다.
+- 2026-04-01: `tests/statusline-client.test.mjs`에 width-specific artifact materialization 회귀 테스트를 추가했다. 첫 요청 뒤 snapshot을 지워도 같은 width 요청은 기존 collector text artifact로 계속 서빙된다.
+- 2026-04-01: `node scripts/bench-statusline-live.mjs --json --collector-mode collector --format tmux-badges --width 120 --forced-runs 1` 기준으로 cold `80.5ms`, warm `40.3ms`, stale `41.7ms`, forced-miss `42.2ms`를 확인했다.

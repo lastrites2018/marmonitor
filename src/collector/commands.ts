@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { loadConfig, resolveConfigPath as resolveLoadedConfigPath } from "../config/index.js";
+import { resolveConfigPath as resolveLoadedConfigPath } from "../config/index.js";
 import { startDetachedCollector, stopCollectorProcess } from "./client.js";
 import { DEFAULT_COLLECTOR_FORMATS, runCollectorLoop } from "./loop.js";
 import {
@@ -83,8 +83,7 @@ export function registerCollectorCommands(params: {
     .option("--config <path>", "Path to settings.json")
     .action(async (opts) => {
       const requestedConfigPath = resolveLoadedConfigPath(params.resolveConfigPath(opts));
-      const config = await loadConfig(requestedConfigPath);
-      await runCollectorLoop(config, {
+      await runCollectorLoop({
         intervalMs: resolveIntervalMs(opts.interval),
         once: Boolean(opts.once),
         formats: DEFAULT_COLLECTOR_FORMATS,

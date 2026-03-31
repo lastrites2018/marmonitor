@@ -134,6 +134,8 @@ artifact 모델
 - `statusline-{format}-{attentionLimit}-{width}.txt`
   - optional derived cache
   - snapshot에서 언제든 재생성 가능
+  - width-sensitive format은 필요한 width가 처음 요청됐을 때만 on-demand로 materialize한다.
+  - collector가 모든 width를 미리 계산할 필요는 없다.
 
 왜 file-backed collector로 시작하는가
 - socket/IPC server보다 단순하다.
@@ -262,3 +264,9 @@ artifact 모델
 - 2026-03-31: `--statusline` fast path는 이제 `resolveConfigPath()` 결과와 collector health의 `configPath`를 맞춰 본 뒤, 일치할 때만 collector artifact를 읽는다. config가 다르면 기존 fallback 경로로 내려간다.
 - 2026-03-31: `collector stop`은 signal 전송과 함께 health artifact도 제거해 explicit stop 직후 stale healthy 상태가 남지 않게 정리했다.
 - 2026-03-31: 최신 sequential 검증에서 healthy collector가 있는 `--statusline` perf 출력은 `collector.readHealth`와 `collector.readStatusline`만 남았고, `scanAgents`, `renderStatusline`, local SWR cache read는 foreground hot path에서 빠졌다.
+- 2026-03-31: `src/statusline-client.ts`를 추가해 statusline 전용 thin client를 분리했다. 이 모듈은 `--statusline` 인자만 파싱하고 기존 serve 로직을 재사용한다.
+- 2026-03-31: `bin/marmonitor.js`는 `--statusline` 호출이면 thin client로 우회하고, 나머지 명령만 full CLI를 로드한다. 기존 사용자 인터페이스를 유지한 채 bootstrap 비용만 줄인 단계다.
+- 2026-03-31: refresh worker는 `bin/marmonitor-statusline.js`를 사용하고, detached collector start는 `bin/marmonitor.js`를 사용하도록 entrypoint 책임을 분리했다.
+- 2026-03-31: collector loop는 tick마다 config를 다시 읽는다. config source를 workflow 바깥에 두지 않고, loop iteration 경계에서만 주입받게 정리했다.
+- 2026-04-01: width-sensitive statusline은 exact width artifact가 없을 때만 collector snapshot에서 한 번 렌더하고, 그 결과를 same-width derived cache로 승격하도록 바꿨다.
+- 2026-04-01: 이 구조는 `snapshot`을 권위 원본으로 유지하면서도, 자주 재사용되는 `width-specific statusline text`를 파생 캐시로 materialize하는 방식이라 `Simple Made Easy` 기준에 맞는다.

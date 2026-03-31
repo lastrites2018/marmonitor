@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import type { MarmonitorConfig } from "../config/index.js";
 import type { StatuslineFormat } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
+import { resolveCliEntrypoint } from "./entrypoints.js";
 import {
   collectorHealthMaxAgeMs,
   isCollectorHealthy,
@@ -16,10 +17,6 @@ import {
   readCollectorStatusline,
   releaseCollectorRunLock,
 } from "./store.js";
-
-function resolveCliEntrypoint(): string {
-  return process.argv[1] ?? "bin/marmonitor.js";
-}
 
 export async function readHealthyCollectorSnapshot(
   config: MarmonitorConfig,

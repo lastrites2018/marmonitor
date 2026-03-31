@@ -9,7 +9,8 @@
     "linux"
   ],
   "bin": {
-    "marmonitor": "./bin/marmonitor.js"
+    "marmonitor": "./bin/marmonitor.js",
+    "marmonitor-statusline": "./bin/marmonitor-statusline.js"
   },
   "files": [
     "bin/",

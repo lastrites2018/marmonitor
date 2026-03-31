@@ -10,11 +10,13 @@ import {
   readHealthyCollectorSnapshotForRequest,
   startDetachedCollector,
 } from "./client.js";
+import { resolveStatuslineEntrypoint } from "./entrypoints.js";
 import { decideStatuslineServe } from "./model.js";
 import {
   readCachedSnapshotEntry,
   readCachedStatuslineEntry,
   writeCachedStatusline,
+  writeCollectorStatusline,
 } from "./store.js";
 
 async function spawnStatuslineRefreshWorker(params: {
@@ -29,7 +31,7 @@ async function spawnStatuslineRefreshWorker(params: {
   if (!acquired) return false;
 
   const args = [
-    process.argv[1] ?? "bin/marmonitor.js",
+    resolveStatuslineEntrypoint(),
     "--statusline",
     "--statusline-format",
     params.format,
@@ -81,12 +83,14 @@ export async function runStatuslineCommand(params: {
       requestedConfigPath,
     });
     if (configAwareCollectorSnapshot) {
-      return await renderStatusline(
+      const rendered = await renderStatusline(
         configAwareCollectorSnapshot,
         params.format,
         attentionLimit,
         params.width,
       );
+      await writeCollectorStatusline(params.format, attentionLimit, params.width, rendered);
+      return rendered;
     }
     if (!isRefreshWorker) {
       await startDetachedCollector({

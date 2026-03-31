@@ -39,6 +39,7 @@
   - `npm run bench:statusline-live`
 - JSON 출력: `npm run bench:statusline-live -- --json`
 - collector 경로 측정: `npm run bench:statusline-live -- --json --collector-mode collector`
+- 현재 `marmonitor --statusline`는 full CLI 대신 thin statusline client로 우회된다.
 - 스크립트
   - [`scripts/bench-statusline-live.mjs`](../scripts/bench-statusline-live.mjs)
 - 기본 동작
@@ -69,27 +70,43 @@
     - `warm_file_cache`: full/light 모두 약 `1ms`
 - live statusline benchmark
   - 측정 명령: `node scripts/bench-statusline-live.mjs --json`
-  - 측정 시점 commit: `b26bdf5ffcfae05f42a8bd6ec4f704a3b010949b`
+  - 측정 시점 commit: `b16af20567c89108185bf4860f9f02f68951b4c5`
   - baseline commit: `6f04e60c4605db77586dc7a73a2e4bfe8814d8d6`
   - host: `Apple M3 Max`, `14` logical CPU, `36GB RAM`
-  - tmux: `3` sessions, `7` panes
-  - agents: `37`
+  - tmux: `29` sessions, `67` panes
+  - agents: `19`
   - TTL: `snapshot=10000ms`, `statusline=10000ms`, `stdout=10000ms`
   - 결과 요약
-    - `cold`: `1413.3ms`
-    - `warm`: `66.1ms`
-    - `forced-miss`: `550.1ms`, `118.4ms`
+    - `cold`: `2063.2ms`
+    - `warm`: `51.5ms`
+    - `stale-served`: `46.2ms`
+    - `forced-miss`: `46.4ms`
+  - 해석
+    - collector가 없는 첫 실행은 여전히 스캔 비용을 모두 지불하므로 크다.
+    - 반대로 warm/stale/forced-miss는 thin statusline client 우회 덕분에 commander/CLI bootstrap 비용이 크게 줄었다.
 - live statusline benchmark, collector mode
   - 측정 명령: `node scripts/bench-statusline-live.mjs --json --collector-mode collector --forced-runs 1`
   - host: `Apple M3 Max`, `14` logical CPU, `36GB RAM`
   - 결과 요약
-    - `cold`: `51.4ms`
-    - `warm`: `50.8ms`
-    - `stale-served`: `54.7ms`
-    - `forced-miss`: `54.8ms`
+    - `cold`: `48.0ms`
+    - `warm`: `44.6ms`
+    - `stale-served`: `54.3ms`
+    - `forced-miss`: `48.2ms`
   - 해석
     - collector health에 config path / TTL / attentionLimit를 함께 기록해 foreground `--statusline`이 config load 없이 `health.json + pre-rendered statusline text`만 읽도록 줄였다.
+    - `marmonitor --statusline`도 thin client로 우회되므로 tmux 설정을 바꾸지 않아도 같은 구조를 쓴다.
     - benchmark는 시작/종료 시 detached collector를 정리해 이전 세션이 측정값을 오염시키지 않게 한다.
+- live statusline benchmark, collector mode, width-aware tmux path
+  - 측정 명령: `node scripts/bench-statusline-live.mjs --json --collector-mode collector --format tmux-badges --width 120 --forced-runs 1`
+  - host: `Apple M3 Max`, `14` logical CPU, `36GB RAM`
+  - 결과 요약
+    - `cold`: `80.5ms`
+    - `warm`: `40.3ms`
+    - `stale-served`: `41.7ms`
+    - `forced-miss`: `42.2ms`
+  - 해석
+    - width-sensitive format은 exact width artifact가 없을 때만 collector snapshot에서 한 번 렌더하고, 같은 width 요청이 다시 오면 `health.json + statusline-{format}-{attentionLimit}-{width}.txt`만 읽는다.
+    - 실제 `tmux-badges --width 120` 경로도 두 번째 요청부터는 foreground `renderStatusline()`을 다시 수행하지 않는다.
 
 검토 순서
 1. `npm run bench:codex-index -- --json`로 fixture 기반 숫자를 캡처한다.

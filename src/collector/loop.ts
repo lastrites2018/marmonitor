@@ -1,9 +1,9 @@
-import type { MarmonitorConfig } from "../config/index.js";
 import { renderStatusline } from "../output/index.js";
 import type { StatuslineFormat } from "../output/utils.js";
 import { scanAgents } from "../scanner/index.js";
 import { VERSION } from "../version.js";
 import type { CollectorHealth } from "./model.js";
+import { loadCollectorRuntime } from "./runtime.js";
 import {
   acquireCollectorRunLock,
   readCollectorSnapshot,
@@ -47,12 +47,12 @@ async function writeRenderedStatuslines(
 }
 
 async function refreshCollectorArtifacts(
-  config: MarmonitorConfig,
+  runtime: Awaited<ReturnType<typeof loadCollectorRuntime>>,
   options: CollectorLoopOptions,
   startedAt: number,
 ): Promise<void> {
-  const previousSnapshot = await readCollectorSnapshot(config.performance.snapshotTtlMs);
-  const snapshot = await scanAgents(config, {
+  const previousSnapshot = await readCollectorSnapshot(runtime.config.performance.snapshotTtlMs);
+  const snapshot = await scanAgents(runtime.config, {
     enrichmentMode: "light",
     includeStdoutHeuristic: true,
     useSharedRuntimeSnapshots: true,
@@ -63,7 +63,7 @@ async function refreshCollectorArtifacts(
   await writeRenderedStatuslines(
     snapshot,
     options.formats ?? DEFAULT_COLLECTOR_FORMATS,
-    config.display.statuslineAttentionLimit,
+    runtime.config.display.statuslineAttentionLimit,
     options.width,
   );
   const completedAt = Date.now();
@@ -75,23 +75,21 @@ async function refreshCollectorArtifacts(
     version: VERSION,
     lastSuccessAt: completedAt,
     snapshotGeneratedAt: completedAt,
-    configPath: options.configPath,
-    snapshotTtlMs: config.performance.snapshotTtlMs,
-    statuslineTtlMs: config.performance.statuslineTtlMs,
-    statuslineAttentionLimit: config.display.statuslineAttentionLimit,
+    configPath: runtime.resolvedConfigPath,
+    snapshotTtlMs: runtime.config.performance.snapshotTtlMs,
+    statuslineTtlMs: runtime.config.performance.statuslineTtlMs,
+    statuslineAttentionLimit: runtime.config.display.statuslineAttentionLimit,
   });
 }
 
-export async function runCollectorLoop(
-  config: MarmonitorConfig,
-  options: CollectorLoopOptions,
-): Promise<void> {
+export async function runCollectorLoop(options: CollectorLoopOptions): Promise<void> {
   const acquired = await acquireCollectorRunLock();
   if (!acquired) {
     throw new Error("collector is already running");
   }
 
   const startedAt = Date.now();
+  const initialRuntime = await loadCollectorRuntime(options.configPath);
   try {
     await writeCollectorHealth({
       pid: process.pid,
@@ -99,16 +97,17 @@ export async function runCollectorLoop(
       lastTickAt: startedAt,
       state: "starting",
       version: VERSION,
-      configPath: options.configPath,
-      snapshotTtlMs: config.performance.snapshotTtlMs,
-      statuslineTtlMs: config.performance.statuslineTtlMs,
-      statuslineAttentionLimit: config.display.statuslineAttentionLimit,
+      configPath: initialRuntime.resolvedConfigPath,
+      snapshotTtlMs: initialRuntime.config.performance.snapshotTtlMs,
+      statuslineTtlMs: initialRuntime.config.performance.statuslineTtlMs,
+      statuslineAttentionLimit: initialRuntime.config.display.statuslineAttentionLimit,
     });
 
     let keepRunning = true;
     while (keepRunning) {
       try {
         const refreshingAt = Date.now();
+        const runtime = await loadCollectorRuntime(options.configPath);
         await writeCollectorHealth({
           pid: process.pid,
           startedAt,
@@ -116,12 +115,12 @@ export async function runCollectorLoop(
           lastSuccessAt: refreshingAt,
           state: "refreshing",
           version: VERSION,
-          configPath: options.configPath,
-          snapshotTtlMs: config.performance.snapshotTtlMs,
-          statuslineTtlMs: config.performance.statuslineTtlMs,
-          statuslineAttentionLimit: config.display.statuslineAttentionLimit,
+          configPath: runtime.resolvedConfigPath,
+          snapshotTtlMs: runtime.config.performance.snapshotTtlMs,
+          statuslineTtlMs: runtime.config.performance.statuslineTtlMs,
+          statuslineAttentionLimit: runtime.config.display.statuslineAttentionLimit,
         });
-        await refreshCollectorArtifacts(config, options, startedAt);
+        await refreshCollectorArtifacts(runtime, options, startedAt);
       } catch (error) {
         await writeCollectorHealth({
           pid: process.pid,
@@ -131,10 +130,10 @@ export async function runCollectorLoop(
           state: "degraded",
           version: VERSION,
           errorMessage: error instanceof Error ? error.message : String(error),
-          configPath: options.configPath,
-          snapshotTtlMs: config.performance.snapshotTtlMs,
-          statuslineTtlMs: config.performance.statuslineTtlMs,
-          statuslineAttentionLimit: config.display.statuslineAttentionLimit,
+          configPath: initialRuntime.resolvedConfigPath,
+          snapshotTtlMs: initialRuntime.config.performance.snapshotTtlMs,
+          statuslineTtlMs: initialRuntime.config.performance.statuslineTtlMs,
+          statuslineAttentionLimit: initialRuntime.config.display.statuslineAttentionLimit,
         });
         throw error;
       }
