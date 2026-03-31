@@ -1,7 +1,9 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { renderInstallBanner, renderRuntimeBanner } from "./banner/index.js";
 import {
@@ -38,7 +40,10 @@ import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import {
   acquireSnapshotRefreshLock,
+  acquireStatuslineRefreshLock,
+  readCacheFile,
   releaseSnapshotRefreshLock,
+  releaseStatuslineRefreshLock,
   snapshotCacheFile,
   statuslineCacheFile,
   writeCacheFileAtomically,
@@ -466,6 +471,7 @@ function resolveAttentionLimit(
 }
 
 const SNAPSHOT_LOCK_POLL_MS = 150;
+const STATUSLINE_STALE_FALLBACK_MS = 60_000;
 
 async function readCachedStatusline(
   format: string,
@@ -473,15 +479,32 @@ async function readCachedStatusline(
   width: number | undefined,
   ttlMs: number,
 ): Promise<string | undefined> {
+  const cached = await readCachedStatuslineEntry(format, attentionLimit, width, ttlMs);
+  return cached?.fresh ? cached.value : undefined;
+}
+
+async function readCachedStatuslineEntry(
+  format: string,
+  attentionLimit: number,
+  width: number | undefined,
+  ttlMs: number,
+): Promise<
+  | {
+      value: string;
+      ageMs: number;
+      fresh: boolean;
+    }
+  | undefined
+> {
   return await profileAsync("cli", "readCachedStatusline", async () => {
     const path = statuslineCacheFile(format, attentionLimit, width);
-    try {
-      const fileStat = await stat(path);
-      if (Date.now() - fileStat.mtimeMs > ttlMs) return undefined;
-      return (await readFile(path, "utf-8")).trimEnd();
-    } catch {
-      return undefined;
-    }
+    const cached = await readCacheFile(path, ttlMs, (raw) => raw.trimEnd());
+    if (!cached) return undefined;
+    return {
+      value: cached.value,
+      ageMs: cached.ageMs,
+      fresh: cached.fresh,
+    };
   });
 }
 
@@ -507,15 +530,31 @@ async function readCachedSnapshot(
   showDead: boolean,
   ttlMs: number,
 ): Promise<AgentSession[] | undefined> {
+  const cached = await readCachedSnapshotEntry(enrichmentMode, showDead, ttlMs);
+  return cached?.fresh ? cached.value : undefined;
+}
+
+async function readCachedSnapshotEntry(
+  enrichmentMode: "full" | "light",
+  showDead: boolean,
+  ttlMs: number,
+): Promise<
+  | {
+      value: AgentSession[];
+      ageMs: number;
+      fresh: boolean;
+    }
+  | undefined
+> {
   return await profileAsync("snapshot", "readCachedSnapshot", async () => {
     const path = snapshotCacheFile(enrichmentMode, showDead);
-    try {
-      const fileStat = await stat(path);
-      if (Date.now() - fileStat.mtimeMs > ttlMs) return undefined;
-      return JSON.parse(await readFile(path, "utf-8")) as AgentSession[];
-    } catch {
-      return undefined;
-    }
+    const cached = await readCacheFile(path, ttlMs, (raw) => JSON.parse(raw) as AgentSession[]);
+    if (!cached) return undefined;
+    return {
+      value: cached.value,
+      ageMs: cached.ageMs,
+      fresh: cached.fresh,
+    };
   });
 }
 
@@ -604,6 +643,58 @@ async function scanAndPersistSnapshot(
   return agents;
 }
 
+function statuslineStaleMaxMs(ttlMs: number): number {
+  return Math.max(STATUSLINE_STALE_FALLBACK_MS, ttlMs * 6);
+}
+
+function canServeStaleStatusline(ageMs: number, ttlMs: number): boolean {
+  return ageMs <= statuslineStaleMaxMs(ttlMs);
+}
+
+function resolveCliEntrypoint(): string {
+  return (
+    process.argv[1] ?? join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "marmonitor.js")
+  );
+}
+
+async function spawnStatuslineRefreshWorker(params: {
+  format: string;
+  attentionLimit: number;
+  width?: number;
+  configPath?: string;
+}): Promise<boolean> {
+  const acquired = await profileAsync("cli", "acquireStatuslineRefreshLock", () =>
+    acquireStatuslineRefreshLock(params.format, params.attentionLimit, params.width),
+  );
+  if (!acquired) return false;
+
+  const args = [
+    resolveCliEntrypoint(),
+    "--statusline",
+    "--statusline-format",
+    params.format,
+    ...(params.width ? ["--width", String(params.width)] : []),
+    ...(params.configPath ? ["--config", params.configPath] : []),
+  ];
+
+  try {
+    const child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        MARMONITOR_STATUSLINE_WORKER: "1",
+      },
+    });
+    child.unref();
+    return true;
+  } catch {
+    await releaseStatuslineRefreshLock(params.format, params.attentionLimit, params.width);
+    return false;
+  }
+}
+
 async function getAgentsSnapshot(
   config: Awaited<ReturnType<typeof loadConfig>>,
   options: {
@@ -657,24 +748,83 @@ program
       process.exit(1);
     }
     if (opts.statusline) {
+      const isRefreshWorker = process.env.MARMONITOR_STATUSLINE_WORKER === "1";
+      const width = resolveStatuslineWidth(opts.width);
+      let attentionLimit = 5;
       try {
         const config = await loadConfig(resolveConfigPath(opts));
         if (opts.statuslineFormat === "wezterm-pills") {
           console.error("wezterm-pills is paused. Use tmux-badges or another tmux format.");
           process.exit(1);
         }
-        const attentionLimit = config.display.statuslineAttentionLimit;
-        const width = resolveStatuslineWidth(opts.width);
-        const cached = await readCachedStatusline(
+        attentionLimit = config.display.statuslineAttentionLimit;
+        const statuslineCache = await readCachedStatuslineEntry(
           opts.statuslineFormat,
           attentionLimit,
           width,
           config.performance.statuslineTtlMs,
         );
-        if (cached) {
-          console.log(cached);
+        if (statuslineCache?.fresh) {
+          console.log(statuslineCache.value);
           return;
         }
+
+        const snapshotCache = await readCachedSnapshotEntry(
+          "light",
+          config.display.showDead,
+          config.performance.snapshotTtlMs,
+        );
+        if (snapshotCache?.fresh) {
+          const rendered = await renderStatusline(
+            snapshotCache.value,
+            opts.statuslineFormat,
+            attentionLimit,
+            width,
+          );
+          await writeCachedStatusline(opts.statuslineFormat, attentionLimit, width, rendered);
+          console.log(rendered);
+          return;
+        }
+
+        if (!isRefreshWorker) {
+          if (
+            statuslineCache &&
+            !statuslineCache.fresh &&
+            canServeStaleStatusline(statuslineCache.ageMs, config.performance.statuslineTtlMs)
+          ) {
+            await spawnStatuslineRefreshWorker({
+              format: opts.statuslineFormat,
+              attentionLimit,
+              width,
+              configPath: opts.config,
+            });
+            console.log(statuslineCache.value);
+            return;
+          }
+
+          if (
+            snapshotCache &&
+            !snapshotCache.fresh &&
+            canServeStaleStatusline(snapshotCache.ageMs, config.performance.snapshotTtlMs)
+          ) {
+            await spawnStatuslineRefreshWorker({
+              format: opts.statuslineFormat,
+              attentionLimit,
+              width,
+              configPath: opts.config,
+            });
+            console.log(
+              await renderStatusline(
+                snapshotCache.value,
+                opts.statuslineFormat,
+                attentionLimit,
+                width,
+              ),
+            );
+            return;
+          }
+        }
+
         const agents = await getAgentsSnapshot(config, {
           enrichmentMode: "light",
           includeStdoutHeuristic: true,
@@ -692,6 +842,10 @@ program
       } catch {
         console.log(renderUnavailableStatusline(opts.statuslineFormat));
         return;
+      } finally {
+        if (isRefreshWorker) {
+          await releaseStatuslineRefreshLock(opts.statuslineFormat, attentionLimit, width);
+        }
       }
     }
     console.log("TUI dashboard not yet implemented. Use 'marmonitor status' for now.");

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from "node:child_process";
-import { mkdir, readdir, rm, unlink } from "node:fs/promises";
+import { mkdir, readdir, rm, unlink, utimes } from "node:fs/promises";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -146,6 +146,20 @@ async function clearSnapshotArtifacts() {
   }
 }
 
+async function ageSnapshotArtifacts(ageMs) {
+  const staleAt = new Date(Date.now() - ageMs);
+  try {
+    const entries = await readdir(cacheRoot);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith("snapshot-") || entry.startsWith("statusline-"))
+        .map((entry) => utimes(join(cacheRoot, entry), staleAt, staleAt)),
+    );
+  } catch {
+    // best effort only
+  }
+}
+
 async function collectAgentCount(configPath) {
   try {
     const { stdout } = await runMarmonitor(
@@ -190,6 +204,9 @@ function printHumanSummary(summary) {
   );
   console.log(`cold: ${summary.measurements.cold.realMs}ms`);
   console.log(`warm: ${summary.measurements.warm.realMs}ms`);
+  if (summary.measurements.staleServed) {
+    console.log(`stale-served: ${summary.measurements.staleServed.realMs}ms`);
+  }
   for (const [index, measurement] of summary.measurements.forcedMiss.entries()) {
     console.log(
       `forced-miss #${index + 1}: ${measurement.realMs}ms (pidusage=${measurement.pidusageMs ?? "n/a"}ms, ps_list=${measurement.psListMs ?? "n/a"}ms)`,
@@ -238,6 +255,12 @@ async function main() {
     forcedMiss.push(parsePerf(measurement.stderr, measurement.durationMs));
   }
 
+  await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+  await ageSnapshotArtifacts(
+    Math.max(config.performance.snapshotTtlMs, config.performance.statuslineTtlMs) + 1_000,
+  );
+  const staleServed = await runMarmonitor(statuslineArgs, { MARMONITOR_PERF: "1" });
+
   const tmuxSessions = await getTmuxMetric(["ls"]);
   const tmuxPanes = await getTmuxMetric(["list-panes", "-a"]);
   const agentCount = await collectAgentCount(configPath);
@@ -264,6 +287,7 @@ async function main() {
     measurements: {
       cold: parsePerf(cold.stderr, cold.durationMs),
       warm: parsePerf(warm.stderr, warm.durationMs),
+      staleServed: parsePerf(staleServed.stderr, staleServed.durationMs),
       forcedMiss,
     },
   };
