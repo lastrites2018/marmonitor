@@ -149,14 +149,30 @@ export async function scanAgents(
       lastResponseAt = cachedEnrichment.lastResponseAt;
       lastActivityAt = cachedEnrichment.lastActivityAt;
     } else if (agentName === "Claude Code") {
-      const claudeData = await parseClaudeSession(proc.pid, config, {
+      let processCwd: string | undefined;
+      let processStartTime: number | undefined;
+      let claudeData = await parseClaudeSession(proc.pid, config, {
         includeTokenUsage,
         runtimePaths,
       });
+      if (!claudeData.sessionMatched) {
+        processCwd = (await getProcessCwd(proc.pid)) ?? undefined;
+        if (processCwd) {
+          processStartTime = await getProcessStartTime(proc.pid, {
+            sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
+          });
+          claudeData = await parseClaudeSession(proc.pid, config, {
+            includeTokenUsage,
+            runtimePaths,
+            cwd: processCwd,
+            processStartedAt: processStartTime,
+          });
+        }
+      }
       if (claudeData.cwd) cwd = claudeData.cwd;
-      if (cwd === "unknown") cwd = (await getProcessCwd(proc.pid)) ?? "unknown";
+      if (cwd === "unknown") cwd = processCwd ?? "unknown";
       sessionId = claudeData.sessionId;
-      startedAt = claudeData.startedAt;
+      startedAt = claudeData.startedAt ?? processStartTime;
       tokenUsage = claudeData.tokenUsage;
       model = claudeData.model;
       sessionMatched = claudeData.sessionMatched ?? false;

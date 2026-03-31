@@ -34,12 +34,20 @@ import { readSharedCache, writeSharedCache } from "./shared-cache.js";
 
 const CLAUDE_SHARED_SESSION_TTL_MS = 60_000;
 const CLAUDE_SHARED_PHASE_TTL_MS = 60_000;
+const CLAUDE_SESSION_TIMESTAMP_MATCH_SEC = 300;
 
 interface ClaudeSharedCacheOptions {
   cacheRoot?: string;
   nowMs?: number;
   openFile?: typeof open;
   statFile?: typeof stat;
+}
+
+interface ClaudeSessionParseOptions {
+  includeTokenUsage?: boolean;
+  runtimePaths?: RuntimeDataPaths;
+  cwd?: string;
+  processStartedAt?: number;
 }
 
 export function getClaudeProjectRoots(
@@ -608,35 +616,154 @@ export async function detectClaudePhase(
   });
 }
 
-/** Parse Claude Code session file for enriched data */
-export async function parseClaudeSession(
-  pid: number,
+/**
+ * Read the first line of a JSONL file to extract session metadata.
+ * Returns undefined if the file can't be read or parsed.
+ */
+async function readJsonlFirstLine(
+  filePath: string,
+): Promise<{ sessionId?: string; cwd?: string; timestamp?: string } | undefined> {
+  let fd: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    fd = await open(filePath, "r");
+    const buf = Buffer.alloc(4096);
+    await fd.read(buf, 0, 4096, 0);
+    const firstLine = buf.toString("utf-8").split("\n")[0];
+    if (!firstLine) return undefined;
+    return JSON.parse(firstLine);
+  } catch {
+    return undefined;
+  } finally {
+    await fd?.close().catch(() => {});
+  }
+}
+
+/**
+ * Match a Claude session by scanning JSONL files in the project directory.
+ * When processStartedAt is available, matches by JSONL first-line timestamp
+ * proximity to process start time. Falls back to the most recently modified
+ * JSONL when no close timestamp match is available.
+ */
+export async function matchClaudeSessionByMtime(
+  cwd: string,
+  processStartedAt: number | undefined,
   config?: MarmonitorConfig,
-  options: { includeTokenUsage?: boolean; runtimePaths?: RuntimeDataPaths } = {},
-): Promise<Partial<AgentSession>> {
-  return await profileAsync("claude", "parseClaudeSession", async () => {
-    const sessionFile = getClaudeSessionRoots(config, options.runtimePaths)
-      .map((root) => join(root, `${pid}.json`))
-      .find((candidate) => existsSync(candidate));
-    if (!sessionFile) return {};
+  options: Omit<ClaudeSessionParseOptions, "cwd" | "processStartedAt"> = {},
+): Promise<Partial<AgentSession> | undefined> {
+  return await profileAsync("claude", "matchClaudeSessionByMtime", async () => {
+    const projectDirName = await findClaudeProjectDir(cwd, undefined, config, options.runtimePaths);
+    if (!projectDirName) return undefined;
+
+    const projectRoots = getClaudeProjectRoots(config, options.runtimePaths);
+    const candidates: Array<{ path: string; mtimeMs: number }> = [];
+
+    for (const projectsDir of projectRoots) {
+      const projectDir = join(projectsDir, projectDirName);
+      if (!existsSync(projectDir)) continue;
+      try {
+        const files = await readdir(projectDir);
+        for (const file of files) {
+          if (!file.endsWith(".jsonl")) continue;
+          try {
+            const filePath = join(projectDir, file);
+            const fileStat = await stat(filePath);
+            candidates.push({ path: filePath, mtimeMs: fileStat.mtimeMs });
+          } catch {
+            // skip candidate
+          }
+        }
+      } catch {
+        // skip project root
+      }
+    }
+
+    if (candidates.length === 0) return undefined;
+
+    const pool =
+      processStartedAt === undefined
+        ? candidates
+        : (() => {
+            const startMs = processStartedAt * 1000;
+            const active = candidates.filter(
+              (candidate) => candidate.mtimeMs >= startMs - CLAUDE_SESSION_MTIME_MATCH_SEC * 1000,
+            );
+            return active.length > 0 ? active : candidates;
+          })();
+
+    let bestPath: string | undefined;
+
+    if (processStartedAt !== undefined) {
+      const scored: Array<{ path: string; deltaSec: number; mtimeMs: number }> = [];
+      for (const candidate of pool) {
+        const entry = await readJsonlFirstLine(candidate.path);
+        if (!entry?.timestamp) continue;
+        const createdAt = new Date(entry.timestamp).getTime() / 1000;
+        if (!Number.isFinite(createdAt)) continue;
+        scored.push({
+          path: candidate.path,
+          deltaSec: Math.abs(createdAt - processStartedAt),
+          mtimeMs: candidate.mtimeMs,
+        });
+      }
+
+      if (scored.length > 0) {
+        scored.sort((a, b) => a.deltaSec - b.deltaSec || b.mtimeMs - a.mtimeMs);
+        if (scored[0].deltaSec <= CLAUDE_SESSION_TIMESTAMP_MATCH_SEC) {
+          bestPath = scored[0].path;
+        }
+      }
+    }
+
+    bestPath ??=
+      selectRecentSessionFile(pool) ?? [...pool].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.path;
+    if (!bestPath) return undefined;
+
+    const entry = await readJsonlFirstLine(bestPath);
+    if (!entry?.sessionId) return undefined;
+
     try {
-      const fileStat = await stat(sessionFile);
-      const raw = await readFile(sessionFile, "utf-8");
-      const data = JSON.parse(raw);
+      const nowMs = Date.now();
+      const fileStat = await stat(bestPath);
+      const sessionCwd = entry.cwd ?? cwd;
+      const startedAt = entry.timestamp
+        ? new Date(entry.timestamp).getTime() / 1000
+        : processStartedAt;
 
       const result: Partial<AgentSession> = {
-        cwd: data.cwd,
-        sessionId: data.sessionId,
-        startedAt: data.startedAt ? data.startedAt / 1000 : undefined,
+        cwd: sessionCwd,
+        sessionId: entry.sessionId,
+        startedAt: Number.isFinite(startedAt) ? startedAt : undefined,
         lastActivityAt: fileStat.mtimeMs / 1000,
         sessionMatched: true,
       };
 
-      if (options.includeTokenUsage !== false && data.sessionId && data.cwd) {
+      upsertSessionRegistryEntry(claudeSessionRegistry, {
+        filePath: bestPath,
+        sessionId: entry.sessionId,
+        cwd: sessionCwd,
+        firstSeenOffset: 0,
+        startedAt: result.startedAt,
+        source: "claude",
+      });
+
+      const projectDir = bestPath.split("/").at(-2);
+      if (projectDir) {
+        claudeProjectDirCache.set(`${cwd}::`, projectDir);
+        claudeProjectDirCache.set(`${sessionCwd}::${entry.sessionId}`, projectDir);
+      }
+
+      await writeSharedCache(
+        "claude-session-file",
+        `${entry.sessionId}:${sessionCwd}:${result.startedAt ?? ""}`,
+        bestPath,
+        { nowMs },
+      );
+
+      if (options.includeTokenUsage !== false) {
         const tokenData = await parseClaudeTokens(
-          data.sessionId,
-          data.cwd,
-          data.startedAt ? data.startedAt / 1000 : undefined,
+          entry.sessionId,
+          sessionCwd,
+          result.startedAt,
           config,
           options.runtimePaths,
         );
@@ -646,7 +773,63 @@ export async function parseClaudeSession(
 
       return result;
     } catch {
-      return {};
+      return undefined;
     }
+  });
+}
+
+/** Parse Claude Code session file for enriched data */
+export async function parseClaudeSession(
+  pid: number,
+  config?: MarmonitorConfig,
+  options: ClaudeSessionParseOptions = {},
+): Promise<Partial<AgentSession>> {
+  return await profileAsync("claude", "parseClaudeSession", async () => {
+    const sessionFile = getClaudeSessionRoots(config, options.runtimePaths)
+      .map((root) => join(root, `${pid}.json`))
+      .find((candidate) => existsSync(candidate));
+    if (sessionFile) {
+      try {
+        const fileStat = await stat(sessionFile);
+        const raw = await readFile(sessionFile, "utf-8");
+        const data = JSON.parse(raw);
+
+        const result: Partial<AgentSession> = {
+          cwd: data.cwd,
+          sessionId: data.sessionId,
+          startedAt: data.startedAt ? data.startedAt / 1000 : undefined,
+          lastActivityAt: fileStat.mtimeMs / 1000,
+          sessionMatched: true,
+        };
+
+        if (options.includeTokenUsage !== false && data.sessionId && data.cwd) {
+          const tokenData = await parseClaudeTokens(
+            data.sessionId,
+            data.cwd,
+            data.startedAt ? data.startedAt / 1000 : undefined,
+            config,
+            options.runtimePaths,
+          );
+          result.tokenUsage = tokenData.tokenUsage;
+          result.model = tokenData.model;
+        }
+
+        return result;
+      } catch {
+        // fall through to project JSONL matching
+      }
+    }
+
+    if (options.cwd && options.cwd !== "unknown") {
+      const matched = await matchClaudeSessionByMtime(
+        options.cwd,
+        options.processStartedAt,
+        config,
+        options,
+      );
+      if (matched) return matched;
+    }
+
+    return {};
   });
 }

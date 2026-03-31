@@ -266,6 +266,146 @@ describe("parseClaudeSession", () => {
     assert.equal(parsed.startedAt, 1_710_000_000);
     assert.equal(parsed.sessionMatched, true);
   });
+
+  it("falls back to project JSONL matching when pid session file is missing", async () => {
+    const pid = 62_626;
+    const cwd = "/repo/claude-fallback-match";
+    const processStartedAt = 1_710_000_000;
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-claude-fallback-"));
+    const sessionsRoot = join(root, "sessions");
+    const projectsRoot = join(root, "projects");
+    const projectDir = join(projectsRoot, cwd.replace(/[/.]/g, "-"));
+    const config = getDefaults();
+
+    await mkdir(sessionsRoot, { recursive: true });
+    await mkdir(projectDir, { recursive: true });
+
+    await writeFile(
+      join(projectDir, "far-session.jsonl"),
+      [
+        JSON.stringify({
+          sessionId: "sess-far",
+          cwd,
+          timestamp: new Date((processStartedAt + 900) * 1000).toISOString(),
+        }),
+        JSON.stringify({
+          message: {
+            model: "claude-far",
+            usage: {
+              input_tokens: 1,
+              output_tokens: 1,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+            },
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    await writeFile(
+      join(projectDir, "matched-session.jsonl"),
+      [
+        JSON.stringify({
+          sessionId: "sess-matched",
+          cwd,
+          timestamp: new Date((processStartedAt + 4) * 1000).toISOString(),
+        }),
+        JSON.stringify({
+          message: {
+            model: "claude-3-7-sonnet",
+            usage: {
+              input_tokens: 11,
+              output_tokens: 7,
+              cache_creation_input_tokens: 3,
+              cache_read_input_tokens: 2,
+            },
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    const parsed = await parseClaudeSession(pid, config, {
+      includeTokenUsage: true,
+      runtimePaths: {
+        claudeProjects: [projectsRoot],
+        claudeSessions: [sessionsRoot],
+        codexSessions: [],
+        extraRoots: [],
+      },
+      cwd,
+      processStartedAt,
+    });
+
+    assert.equal(parsed.sessionMatched, true);
+    assert.equal(parsed.sessionId, "sess-matched");
+    assert.equal(parsed.cwd, cwd);
+    assert.equal(parsed.startedAt, processStartedAt + 4);
+    assert.equal(parsed.model, "claude-3-7-sonnet");
+    assert.deepEqual(parsed.tokenUsage, {
+      inputTokens: 11,
+      outputTokens: 7,
+      cacheCreationTokens: 3,
+      cacheReadTokens: 2,
+      totalTokens: 18,
+    });
+  });
+
+  it("skips token parsing for project JSONL fallback in light mode", async () => {
+    const pid = 72_727;
+    const cwd = "/repo/claude-fallback-light";
+    const processStartedAt = 1_720_000_000;
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-claude-fallback-light-"));
+    const sessionsRoot = join(root, "sessions");
+    const projectsRoot = join(root, "projects");
+    const projectDir = join(projectsRoot, cwd.replace(/[/.]/g, "-"));
+    const config = getDefaults();
+
+    await mkdir(sessionsRoot, { recursive: true });
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "light-session.jsonl"),
+      [
+        JSON.stringify({
+          sessionId: "sess-light",
+          cwd,
+          timestamp: new Date((processStartedAt + 2) * 1000).toISOString(),
+        }),
+        JSON.stringify({
+          message: {
+            model: "claude-ignored",
+            usage: {
+              input_tokens: 99,
+              output_tokens: 12,
+              cache_creation_input_tokens: 1,
+              cache_read_input_tokens: 4,
+            },
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    const parsed = await parseClaudeSession(pid, config, {
+      includeTokenUsage: false,
+      runtimePaths: {
+        claudeProjects: [projectsRoot],
+        claudeSessions: [sessionsRoot],
+        codexSessions: [],
+        extraRoots: [],
+      },
+      cwd,
+      processStartedAt,
+    });
+
+    assert.equal(parsed.sessionMatched, true);
+    assert.equal(parsed.sessionId, "sess-light");
+    assert.equal(parsed.cwd, cwd);
+    assert.equal(parsed.startedAt, processStartedAt + 2);
+    assert.equal(parsed.tokenUsage, undefined);
+    assert.equal(parsed.model, undefined);
+  });
 });
 
 describe("propagateWorkerStateToParent", () => {
