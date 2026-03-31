@@ -10,7 +10,8 @@
   ],
   "bin": {
     "marmonitor": "./bin/marmonitor.js",
-    "marmonitor-statusline": "./bin/marmonitor-statusline.js"
+    "marmonitor-statusline": "./bin/marmonitor-statusline.js",
+    "marmonitor-status-click": "./bin/marmonitor-status-click.js"
   },
   "files": [
     "bin/",
