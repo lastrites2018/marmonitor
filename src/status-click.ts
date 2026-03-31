@@ -1,5 +1,9 @@
-import { spawnSync } from "node:child_process";
-import { resolveCliEntrypoint } from "./collector/entrypoints.js";
+import { execFileSync } from "node:child_process";
+import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
+import { loadConfig, resolveConfigPath } from "./config/index.js";
+import { getAgentsSnapshot } from "./snapshot/service.js";
+import { jumpToAgent } from "./tmux/index.js";
+import type { AgentSession } from "./types.js";
 
 export function extractPidFromStatusRange(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -10,9 +14,11 @@ export function extractPidFromStatusRange(value: string | undefined): string | u
 export function parseStatusClickArgs(args: string[]): {
   pid?: string;
   configPath?: string;
+  targetClient?: string;
 } {
   const directRange = args[0];
   let configPath: string | undefined;
+  let targetClient: string | undefined;
 
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
@@ -23,32 +29,73 @@ export function parseStatusClickArgs(args: string[]): {
         index += 1;
       }
     }
+    if (arg === "--client-tty" || arg === "--target-client") {
+      const value = args[index + 1];
+      if (value) {
+        targetClient = value;
+        index += 1;
+      }
+    }
   }
 
   return {
     pid: extractPidFromStatusRange(directRange),
     configPath,
+    targetClient,
   };
 }
 
-export function runStatusClick(args: string[] = process.argv.slice(2)): number {
-  const options = parseStatusClickArgs(args);
-  if (!options.pid) return 0;
-
-  const cliArgs = [
-    resolveCliEntrypoint(),
-    "jump",
-    "--pid",
-    options.pid,
-    ...(options.configPath ? ["--config", options.configPath] : []),
-  ];
-  const result = spawnSync(process.execPath, cliArgs, {
-    stdio: "ignore",
-    env: process.env,
-  });
-  return result.status ?? 0;
+export function findClickedAgent(sessions: AgentSession[], pid: number): AgentSession | undefined {
+  return sessions.find((session) => session.pid === pid);
 }
 
-export function main(): void {
-  process.exit(runStatusClick());
+function refreshTmuxClient(targetClient?: string): void {
+  const args = ["refresh-client", "-S"];
+  if (targetClient) {
+    args.push("-t", targetClient);
+  }
+  try {
+    execFileSync("tmux", args, {
+      stdio: "ignore",
+      env: process.env,
+    });
+  } catch {
+    // Ignore refresh failures; the jump result is the important side effect.
+  }
+}
+
+export async function runStatusClick(args: string[] = process.argv.slice(2)): Promise<number> {
+  const options = parseStatusClickArgs(args);
+  if (!options.pid) return 0;
+  const pid = Number.parseInt(options.pid, 10);
+  if (!Number.isFinite(pid)) return 0;
+
+  const requestedConfigPath = resolveConfigPath(options.configPath);
+  const config = await loadConfig(requestedConfigPath);
+  const sessions =
+    (await readHealthyCollectorSnapshotForRequest({
+      config,
+      requestedConfigPath,
+    })) ??
+    (await getAgentsSnapshot(config, {
+      enrichmentMode: "light",
+      includeStdoutHeuristic: true,
+      useSharedRuntimeSnapshots: true,
+    }));
+  const agent = findClickedAgent(sessions, pid);
+  if (!agent) return 1;
+
+  const result = await jumpToAgent(agent, {
+    targetClient: options.targetClient,
+    insideTmux: true,
+  });
+  if (result.executed) {
+    refreshTmuxClient(options.targetClient);
+    return 0;
+  }
+  return 1;
+}
+
+export async function main(): Promise<void> {
+  process.exit(await runStatusClick());
 }

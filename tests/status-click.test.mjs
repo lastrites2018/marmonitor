@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractPidFromStatusRange, parseStatusClickArgs } from "../dist/status-click.js";
+import {
+  extractPidFromStatusRange,
+  findClickedAgent,
+  parseStatusClickArgs,
+} from "../dist/status-click.js";
 
 describe("status click helper", () => {
   it("extracts pid from a status range", () => {
@@ -17,6 +21,41 @@ describe("status click helper", () => {
     assert.deepEqual(parseStatusClickArgs(["pid:99", "--config", "/tmp/marmonitor.json"]), {
       pid: "99",
       configPath: "/tmp/marmonitor.json",
+      targetClient: undefined,
     });
+  });
+
+  it("parses the clicked client tty alongside the range", () => {
+    assert.deepEqual(
+      parseStatusClickArgs([
+        "pid:99",
+        "--client-tty",
+        "/dev/ttys032",
+        "--config",
+        "/tmp/marmonitor.json",
+      ]),
+      {
+        pid: "99",
+        configPath: "/tmp/marmonitor.json",
+        targetClient: "/dev/ttys032",
+      },
+    );
+  });
+
+  it("accepts --target-client as an alias for the target tty", () => {
+    assert.deepEqual(parseStatusClickArgs(["pid:99", "--target-client", "/dev/ttys040"]), {
+      pid: "99",
+      configPath: undefined,
+      targetClient: "/dev/ttys040",
+    });
+  });
+
+  it("finds the clicked agent by pid", () => {
+    const sessions = [
+      { pid: 10, cwd: "/repo/a", agentName: "Claude Code" },
+      { pid: 20, cwd: "/repo/b", agentName: "Codex" },
+    ];
+    assert.deepEqual(findClickedAgent(sessions, 20), sessions[1]);
+    assert.equal(findClickedAgent(sessions, 30), undefined);
   });
 });

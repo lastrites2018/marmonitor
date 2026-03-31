@@ -41,6 +41,11 @@ export interface TmuxJumpResult {
   message?: string;
 }
 
+export interface TmuxJumpOptions {
+  targetClient?: string;
+  insideTmux?: boolean;
+}
+
 export function parseTmuxPanes(raw: string): TmuxPane[] {
   return raw
     .split("\n")
@@ -207,29 +212,42 @@ export async function captureTmuxPaneOutput(
   }
 }
 
-export async function jumpToTmuxPane(target: TmuxJumpTarget): Promise<boolean> {
+export function buildTmuxPaneJumpCommands(
+  target: TmuxJumpTarget,
+  options: TmuxJumpOptions = {},
+): string[][] {
   const windowTarget = `${target.pane.sessionName}:${target.pane.windowIndex}`;
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
+
+  if (options.targetClient) {
+    return [["switch-client", "-c", options.targetClient, "-t", target.pane.target]];
+  }
+
+  if (insideTmux) {
+    return [
+      ["switch-client", "-t", windowTarget],
+      ["select-window", "-t", windowTarget],
+      ["select-pane", "-t", target.pane.target],
+    ];
+  }
+
+  return [
+    ["select-window", "-t", windowTarget],
+    ["select-pane", "-t", target.pane.target],
+  ];
+}
+
+export async function jumpToTmuxPane(
+  target: TmuxJumpTarget,
+  options: TmuxJumpOptions = {},
+): Promise<boolean> {
+  const commands = buildTmuxPaneJumpCommands(target, options);
 
   try {
-    if (process.env.TMUX) {
-      await profileAsync("tmux", "switch_client", () =>
-        execFileAsync("tmux", ["switch-client", "-t", windowTarget]),
-      );
-      await profileAsync("tmux", "select_window", () =>
-        execFileAsync("tmux", ["select-window", "-t", windowTarget]),
-      );
-      await profileAsync("tmux", "select_pane", () =>
-        execFileAsync("tmux", ["select-pane", "-t", target.pane.target]),
-      );
-      return true;
+    for (const argv of commands) {
+      const label = argv[0].replace(/-/g, "_");
+      await profileAsync("tmux", label, () => execFileAsync("tmux", argv));
     }
-
-    await profileAsync("tmux", "select_window", () =>
-      execFileAsync("tmux", ["select-window", "-t", windowTarget]),
-    );
-    await profileAsync("tmux", "select_pane", () =>
-      execFileAsync("tmux", ["select-pane", "-t", target.pane.target]),
-    );
     return true;
   } catch {
     return false;
@@ -238,24 +256,26 @@ export async function jumpToTmuxPane(target: TmuxJumpTarget): Promise<boolean> {
 
 export async function jumpToAgent(
   agent: Pick<AgentSession, "pid" | "cwd">,
+  options: TmuxJumpOptions = {},
 ): Promise<TmuxJumpResult> {
   const target = await resolveTmuxJumpTarget(agent);
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
   if (!target) {
     return {
       found: false,
       executed: false,
-      insideTmux: Boolean(process.env.TMUX),
+      insideTmux,
       pid: agent.pid,
       cwd: agent.cwd,
       message: "No tmux pane matched this AI session.",
     };
   }
 
-  const executed = await jumpToTmuxPane(target);
+  const executed = await jumpToTmuxPane(target, options);
   return {
     found: true,
     executed,
-    insideTmux: Boolean(process.env.TMUX),
+    insideTmux,
     pid: agent.pid,
     match: target.match,
     target: target.pane.target,

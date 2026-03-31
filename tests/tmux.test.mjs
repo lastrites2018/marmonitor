@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildTmuxPaneJumpCommands,
   getTmuxRuntimeSnapshot,
   isPidInTree,
   parseProcessTree,
@@ -81,6 +82,41 @@ describe("selectTmuxPaneForAgent", () => {
     const result = selectTmuxPaneForAgent({ pid: 999, cwd: "/repo/b" }, panes, childMap);
     assert.equal(result?.pane.target, "mjjo:2.1");
     assert.equal(result?.match, "cwd");
+  });
+});
+
+describe("buildTmuxPaneJumpCommands", () => {
+  const target = {
+    pane: {
+      target: "mjjo:2.1",
+      sessionName: "mjjo",
+      windowIndex: 2,
+      paneIndex: 1,
+      panePid: 500,
+      cwd: "/repo/b",
+    },
+    match: "cwd",
+  };
+
+  it("uses an explicit target client when provided", () => {
+    assert.deepEqual(buildTmuxPaneJumpCommands(target, { targetClient: "/dev/ttys032" }), [
+      ["switch-client", "-c", "/dev/ttys032", "-t", "mjjo:2.1"],
+    ]);
+  });
+
+  it("keeps the in-tmux command sequence when no target client is provided", () => {
+    assert.deepEqual(buildTmuxPaneJumpCommands(target, { insideTmux: true }), [
+      ["switch-client", "-t", "mjjo:2"],
+      ["select-window", "-t", "mjjo:2"],
+      ["select-pane", "-t", "mjjo:2.1"],
+    ]);
+  });
+
+  it("falls back to select-window/select-pane outside tmux", () => {
+    assert.deepEqual(buildTmuxPaneJumpCommands(target, { insideTmux: false }), [
+      ["select-window", "-t", "mjjo:2"],
+      ["select-pane", "-t", "mjjo:2.1"],
+    ]);
   });
 });
 
