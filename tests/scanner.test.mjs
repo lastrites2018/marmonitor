@@ -13,6 +13,7 @@ import { parseClaudeSession } from "../dist/scanner/claude.js";
 import { indexCodexSessions } from "../dist/scanner/codex.js";
 import { resolveGeminiProjectDir } from "../dist/scanner/gemini.js";
 import {
+  buildSeedSessionIndex,
   detectAgentFromProcessSignature,
   parseGeminiSessionContent,
   propagateWorkerStateToParent,
@@ -405,6 +406,40 @@ describe("parseClaudeSession", () => {
     assert.equal(parsed.startedAt, processStartedAt + 2);
     assert.equal(parsed.tokenUsage, undefined);
     assert.equal(parsed.model, undefined);
+  });
+});
+
+describe("buildSeedSessionIndex", () => {
+  it("indexes seed sessions by agent name and pid", () => {
+    const index = buildSeedSessionIndex([
+      {
+        agentName: "Claude Code",
+        pid: 101,
+        cwd: "/repo/one",
+        cpuPercent: 0,
+        memoryMb: 10,
+        status: "Idle",
+      },
+      {
+        agentName: "Codex",
+        pid: 101,
+        cwd: "/repo/two",
+        cpuPercent: 0,
+        memoryMb: 10,
+        status: "Idle",
+      },
+      {
+        agentName: "Claude Code",
+        pid: 101,
+        cwd: "/repo/override",
+        cpuPercent: 0,
+        memoryMb: 10,
+        status: "Idle",
+      },
+    ]);
+
+    assert.equal(index?.get("Claude Code:101")?.cwd, "/repo/override");
+    assert.equal(index?.get("Codex:101")?.cwd, "/repo/two");
   });
 });
 

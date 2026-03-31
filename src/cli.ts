@@ -585,6 +585,7 @@ type SnapshotScanOptions = {
   includeTokenUsage?: boolean;
   includeStdoutHeuristic?: boolean;
   useSharedRuntimeSnapshots?: boolean;
+  seedSessions?: AgentSession[];
 };
 
 async function readFreshSnapshotIfAvailable(
@@ -633,6 +634,7 @@ async function scanAndPersistSnapshot(
       includeTokenUsage: options.includeTokenUsage,
       includeStdoutHeuristic: options.includeStdoutHeuristic,
       useSharedRuntimeSnapshots: options.useSharedRuntimeSnapshots,
+      seedSessions: options.seedSessions,
     }),
   );
 
@@ -703,6 +705,7 @@ async function getAgentsSnapshot(
     includeTokenUsage?: boolean;
     includeStdoutHeuristic?: boolean;
     useSharedRuntimeSnapshots?: boolean;
+    seedSessions?: AgentSession[];
   } = {},
 ): Promise<AgentSession[]> {
   const ttlMs = options.ttlMs ?? config.performance.snapshotTtlMs;
@@ -769,6 +772,22 @@ program
           return;
         }
 
+        if (
+          !isRefreshWorker &&
+          statuslineCache &&
+          !statuslineCache.fresh &&
+          canServeStaleStatusline(statuslineCache.ageMs, config.performance.statuslineTtlMs)
+        ) {
+          await spawnStatuslineRefreshWorker({
+            format: opts.statuslineFormat,
+            attentionLimit,
+            width,
+            configPath: opts.config,
+          });
+          console.log(statuslineCache.value);
+          return;
+        }
+
         const snapshotCache = await readCachedSnapshotEntry(
           "light",
           config.display.showDead,
@@ -787,21 +806,6 @@ program
         }
 
         if (!isRefreshWorker) {
-          if (
-            statuslineCache &&
-            !statuslineCache.fresh &&
-            canServeStaleStatusline(statuslineCache.ageMs, config.performance.statuslineTtlMs)
-          ) {
-            await spawnStatuslineRefreshWorker({
-              format: opts.statuslineFormat,
-              attentionLimit,
-              width,
-              configPath: opts.config,
-            });
-            console.log(statuslineCache.value);
-            return;
-          }
-
           if (
             snapshotCache &&
             !snapshotCache.fresh &&
@@ -829,6 +833,7 @@ program
           enrichmentMode: "light",
           includeStdoutHeuristic: true,
           useSharedRuntimeSnapshots: true,
+          seedSessions: snapshotCache?.value,
         });
         const rendered = await renderStatusline(
           agents,
