@@ -38,9 +38,12 @@ async function writeRenderedStatuslines(
   formats: StatuslineFormat[],
   attentionLimit: number,
   width: number | undefined,
+  tmuxBadgeStyle: "minimal" | "pill",
 ): Promise<void> {
   for (const format of formats) {
-    const rendered = await renderStatusline(snapshot, format, attentionLimit, width);
+    const rendered = await renderStatusline(snapshot, format, attentionLimit, width, {
+      tmuxBadgeStyle,
+    });
     await writeCollectorStatusline(format, attentionLimit, width, rendered);
     await writeCachedStatusline(format, attentionLimit, width, rendered);
   }
@@ -65,6 +68,7 @@ async function refreshCollectorArtifacts(
     options.formats ?? DEFAULT_COLLECTOR_FORMATS,
     runtime.config.display.statuslineAttentionLimit,
     options.width,
+    runtime.config.integration.tmux.badgeStyle,
   );
   const completedAt = Date.now();
   await writeCollectorHealth({

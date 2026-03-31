@@ -11,6 +11,7 @@ import type {
 } from "../types.js";
 import {
   type StatuslineFormat,
+  type TmuxBadgeStyle,
   buildAttentionFocusText,
   buildAttentionItems,
   buildJumpAttentionItems,
@@ -23,6 +24,10 @@ import {
   serializeWeztermPills,
   shortenPath,
 } from "./utils.js";
+
+export interface StatuslineRenderOptions {
+  tmuxBadgeStyle?: TmuxBadgeStyle;
+}
 
 /** Collect system resource info */
 export async function getSystemInfo(): Promise<SystemInfo> {
@@ -508,6 +513,7 @@ export async function renderStatusline(
   format: StatuslineFormat = "compact",
   attentionLimit = 5,
   width?: number,
+  options: StatuslineRenderOptions = {},
 ): Promise<string> {
   return await profileAsync("output", "renderStatusline", async () => {
     const alive = agents.filter((a) => a.status !== "Dead" && a.status !== "Unmatched");
@@ -545,12 +551,14 @@ export async function renderStatusline(
     };
 
     if (format === "tmux-badges") {
+      const style = options.tmuxBadgeStyle ?? "minimal";
       const focusText = buildTmuxAttentionPills(
         buildJumpAttentionItems(agents),
         attentionLimit,
         width,
+        style,
       );
-      return buildTmuxBadgeBar(snapshot, focusText);
+      return buildTmuxBadgeBar(snapshot, focusText, style);
     }
 
     if (format === "wezterm-pills") {
@@ -568,6 +576,7 @@ export async function printStatusline(
   format: StatuslineFormat = "compact",
   attentionLimit = 5,
   width?: number,
+  options: StatuslineRenderOptions = {},
 ): Promise<void> {
-  console.log(await renderStatusline(agents, format, attentionLimit, width));
+  console.log(await renderStatusline(agents, format, attentionLimit, width, options));
 }

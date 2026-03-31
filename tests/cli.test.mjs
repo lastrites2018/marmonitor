@@ -31,12 +31,14 @@ describe("config CLI helpers", () => {
     const output = runCli(["settings-init", "--stdout"]);
     const parsed = JSON.parse(output);
     assert.equal(parsed.display.attentionLimit, 10);
+    assert.equal(parsed.integration.tmux.badgeStyle, "minimal");
     assert.equal(parsed.integration.tmux.keys.attentionPopup, "a");
   });
 
   it("prints the advanced config sample to stdout", () => {
     const output = runCli(["settings-init", "--advanced", "--stdout"]);
     const parsed = JSON.parse(output);
+    assert.equal(parsed.integration.tmux.badgeStyle, "minimal");
     assert.equal(parsed.integration.wezterm.enabled, false);
     assert.equal(parsed.integration.banner.install, true);
     assert.ok(Array.isArray(parsed.paths.claudeProjects));
@@ -55,6 +57,12 @@ describe("config CLI helpers", () => {
     assert.match(output, /done/);
     assert.match(output, /Active/);
     assert.match(output, /Stalled/);
+  });
+
+  it("documents tmux badge style in help output", () => {
+    const output = runCli(["--help"]);
+    assert.match(output, /integration\.tmux\.badgeStyle/);
+    assert.match(output, /minimal" \| "pill/);
   });
 });
 

@@ -78,6 +78,9 @@ export async function runStatuslineCommand(params: {
 
     const config = await loadConfig(requestedConfigPath);
     attentionLimit = config.display.statuslineAttentionLimit;
+    const renderOptions = {
+      tmuxBadgeStyle: config.integration.tmux.badgeStyle,
+    } as const;
     const configAwareCollectorSnapshot = await readHealthyCollectorSnapshotForRequest({
       config,
       requestedConfigPath,
@@ -88,6 +91,7 @@ export async function runStatuslineCommand(params: {
         params.format,
         attentionLimit,
         params.width,
+        renderOptions,
       );
       await writeCollectorStatusline(params.format, attentionLimit, params.width, rendered);
       return rendered;
@@ -145,6 +149,7 @@ export async function runStatuslineCommand(params: {
           params.format,
           attentionLimit,
           params.width,
+          renderOptions,
         );
         if (decision.freshness === "fresh") {
           await writeCachedStatusline(params.format, attentionLimit, params.width, rendered);
@@ -164,6 +169,7 @@ export async function runStatuslineCommand(params: {
           params.format,
           attentionLimit,
           params.width,
+          renderOptions,
         );
         await writeCachedStatusline(params.format, attentionLimit, params.width, rendered);
         return rendered;

@@ -80,6 +80,29 @@ export function compactStatuslineDirLabel(cwd: string, maxLength = 26): string {
   return `${parentLabel}/${truncateMiddle(base, baseBudget)}`;
 }
 
+function statuslineRepoLabel(cwd: string): string {
+  const label = compactDirLabel(cwd);
+  const parts = label.split("/").filter(Boolean);
+  return parts.at(-1) ?? label;
+}
+
+function buildStatuslinePathLabels(items: Array<{ cwd: string }>, maxLength: number): string[] {
+  const repoLabels = items.map((item) => statuslineRepoLabel(item.cwd));
+  const counts = new Map<string, number>();
+
+  for (const label of repoLabels) {
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  return items.map((item, index) => {
+    const repoLabel = repoLabels[index];
+    if ((counts.get(repoLabel) ?? 0) === 1) {
+      return truncateMiddle(repoLabel, maxLength);
+    }
+    return compactStatuslineDirLabel(item.cwd, maxLength);
+  });
+}
+
 export interface StatuslineDetailLayout {
   itemCount: number;
   pathMaxLength: number;
@@ -205,6 +228,8 @@ export type StatuslineFormat =
   | "extended"
   | "tmux-badges"
   | "wezterm-pills";
+
+export type TmuxBadgeStyle = "minimal" | "pill";
 
 export type AttentionKind = "unmatched" | "permission" | "stalled" | "thinking" | "tool" | "active";
 
@@ -546,11 +571,12 @@ export function buildAttentionFocusText(
   const detailItems = orderedAttentionItems(items)
     .filter((item) => item.kind !== "unmatched" && item.kind !== "stalled")
     .slice(0, layout.itemCount);
+  const pathLabels = buildStatuslinePathLabels(detailItems, layout.pathMaxLength);
 
   const segments: string[] = [];
-  for (const item of detailItems) {
+  for (const [index, item] of detailItems.entries()) {
     const agent = agentShortName(item.agentName);
-    const path = compactStatuslineDirLabel(item.cwd, layout.pathMaxLength);
+    const path = pathLabels[index];
     const time = formatElapsedCompact(item.lastActivityAt ?? item.lastResponseAt);
     if (item.kind === "permission") {
       segments.push(`⏳${agent} ${path} allow`);
@@ -701,6 +727,10 @@ function tmuxPill(label: string, fg: string, bg: string): string {
   return `#[fg=${bg},bg=#1e1e2e]#[bold,fg=${fg},bg=${bg}] ${label} #[fg=${bg},bg=#1e1e2e]#[default]`;
 }
 
+function tmuxTextAccent(label: string, color: string): string {
+  return `#[fg=${color}]${label}#[default]`;
+}
+
 function tmuxDetailBlock(label: string): string {
   return `#[fg=#cdd6f4,bg=#313244] ${label} #[fg=#313244,bg=#1e1e2e]#[default]`;
 }
@@ -722,11 +752,36 @@ function tmuxAttentionSegment(
   return `#[fg=${bg},bg=#1e1e2e]#[bold,fg=#11111b,bg=${bg}] ${index} #[fg=#313244,bg=${bg}]#[fg=#cdd6f4,bg=#313244] ${label} #[fg=#313244,bg=#1e1e2e]#[default]`;
 }
 
-export function buildTmuxBadgeBar(snapshot: StatuslineSnapshot, focusText?: string): string {
+function tmuxAttentionSegmentMinimal(
+  index: number,
+  kind: Exclude<AttentionKind, "unmatched">,
+  label: string,
+): string {
+  return tmuxTextAccent(`${index} ${label}`, attentionBg(kind));
+}
+
+export function buildTmuxBadgeBar(
+  snapshot: StatuslineSnapshot,
+  focusText?: string,
+  style: TmuxBadgeStyle = "minimal",
+): string {
   const { agents, alerts } = buildStatusPills(snapshot);
-  const agentPills = agents.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg));
-  const alertPills = alerts.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg));
-  const focus = focusText ? `#[fg=#bac2de,bg=#181825] ${focusText} #[default]` : "";
+  const agentPills =
+    style === "pill"
+      ? agents.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
+      : agents.map((pill) => tmuxTextAccent(pill.label, pill.bg));
+  const alertPills =
+    style === "pill"
+      ? alerts.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
+      : alerts.map((pill) => tmuxTextAccent(pill.label, pill.bg));
+  const focus =
+    style === "pill"
+      ? focusText
+        ? `#[fg=#bac2de,bg=#181825] ${focusText} #[default]`
+        : ""
+      : focusText
+        ? focusText
+        : "";
   return [agentPills.join(" "), alertPills.join(" "), focus].filter(Boolean).join("  ");
 }
 
@@ -734,6 +789,7 @@ export function buildTmuxAttentionPills(
   items: AttentionItem[],
   maxCount = 5,
   width?: number,
+  style: TmuxBadgeStyle = "minimal",
 ): string | undefined {
   if (maxCount <= 0) return undefined;
   const layout = resolveStatuslineDetailLayout(width, maxCount);
@@ -743,14 +799,15 @@ export function buildTmuxAttentionPills(
         item.kind !== "unmatched" && item.kind !== "stalled",
     )
     .slice(0, layout.itemCount);
+  const pathLabels = buildStatuslinePathLabels(jumpItems, layout.pathMaxLength);
 
   if (jumpItems.length === 0) {
-    return tmuxDetailBlock("no active");
+    return style === "pill" ? tmuxDetailBlock("no active") : tmuxTextAccent("no active", "#bac2de");
   }
 
   const segments = jumpItems.map((item, index) => {
     const agent = agentShortName(item.agentName);
-    const path = compactStatuslineDirLabel(item.cwd, layout.pathMaxLength);
+    const path = pathLabels[index];
     const time = formatElapsedCompact(item.lastActivityAt ?? item.lastResponseAt);
     const label =
       item.kind === "permission"
@@ -770,7 +827,9 @@ export function buildTmuxAttentionPills(
               : time
                 ? `⚠${agent} ${path} ${time}`
                 : `⚠${agent} ${path}`;
-    return tmuxAttentionSegment(index + 1, item.kind, label);
+    return style === "pill"
+      ? tmuxAttentionSegment(index + 1, item.kind, label)
+      : tmuxAttentionSegmentMinimal(index + 1, item.kind, label);
   });
 
   return segments.join("  ");

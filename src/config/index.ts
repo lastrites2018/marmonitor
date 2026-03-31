@@ -65,6 +65,7 @@ export interface MarmonitorConfig {
   };
   integration: {
     tmux: {
+      badgeStyle: "minimal" | "pill";
       keys: {
         attentionPopup: string;
         jumpPopup: string;
@@ -145,6 +146,7 @@ const DEFAULTS: MarmonitorConfig = {
   },
   integration: {
     tmux: {
+      badgeStyle: "minimal",
       keys: {
         attentionPopup: "a",
         jumpPopup: "j",

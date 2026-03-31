@@ -43,6 +43,7 @@ describe("getDefaults", () => {
     assert.equal(config.intervention.enabled, false);
     assert.equal(config.intervention.mode, "alert");
     assert.equal(config.intervention.defaultAction, "alert");
+    assert.equal(config.integration.tmux.badgeStyle, "minimal");
     assert.equal(config.integration.tmux.keys.attentionPopup, "a");
     assert.equal(config.integration.tmux.keys.jumpPopup, "j");
     assert.equal(config.integration.tmux.keys.dockToggle, "m");
@@ -158,6 +159,7 @@ describe("loadConfig", () => {
       assert.equal(config.display.attentionLimit, 7);
       assert.equal(config.display.statuslineAttentionLimit, 4);
       assert.equal(config.intervention.enabled, false);
+      assert.equal(config.integration.tmux.badgeStyle, "minimal");
       assert.equal(config.integration.tmux.keys.attentionPopup, "a");
       assert.equal(config.integration.wezterm.enabled, false);
       assert.equal(config.integration.wezterm.statusTtlSec, 15);
@@ -231,6 +233,29 @@ describe("loadConfig", () => {
       assert.equal(config.status.phaseDecay.tool, 45);
       assert.equal(config.status.phaseDecay.permission, 0);
       assert.equal(config.status.phaseDecay.done, 5);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges tmux badge style overrides", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "marmonitor-config-"));
+    const path = join(dir, "settings.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        integration: {
+          tmux: {
+            badgeStyle: "pill",
+          },
+        },
+      }),
+    );
+
+    try {
+      const config = await loadConfig(path);
+      assert.equal(config.integration.tmux.badgeStyle, "pill");
+      assert.equal(config.integration.tmux.keys.attentionPopup, "a");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

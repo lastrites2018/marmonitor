@@ -593,7 +593,7 @@ describe("buildStatuslineSummary", () => {
     );
   });
 
-  it("builds tmux styled badge bar", () => {
+  it("builds minimal tmux badge bar by default", () => {
     const text = buildTmuxBadgeBar(
       {
         aliveCount: 19,
@@ -620,6 +620,32 @@ describe("buildStatuslineSummary", () => {
     assert.match(text, /🔧 1/);
     assert.match(text, /Claude mjjo allow/);
     assert.match(text, /#\[fg=/);
+    assert.doesNotMatch(text, //);
+    assert.doesNotMatch(text, /bg=#fab387/);
+  });
+
+  it("keeps pill badge style available as an option", () => {
+    const text = buildTmuxBadgeBar(
+      {
+        aliveCount: 19,
+        waitingCount: 2,
+        riskCount: 0,
+        stalledCount: 1,
+        unmatchedCount: 1,
+        activeCount: 8,
+        highCpuCount: 1,
+        thinkingCount: 3,
+        toolCount: 1,
+        claudeCount: 14,
+        codexCount: 2,
+        geminiCount: 3,
+      },
+      "⏳ Claude mjjo allow",
+      "pill",
+    );
+
+    assert.match(text, //);
+    assert.match(text, /bg=#fab387/);
   });
 
   it("builds shared status pills for terminal adapters", () => {
@@ -837,7 +863,7 @@ describe("buildAttentionItems", () => {
       },
     ]);
 
-    assert.equal(text, "🤔Cl repo/thinking 10s │ 🔧Cx repo/tool 5s │ •Cl repo/active 8s");
+    assert.equal(text, "🤔Cl thinking 10s │ 🔧Cx tool 5s │ •Cl active 8s");
   });
 
   it("builds condensed focus text from top attention items", () => {
@@ -872,7 +898,35 @@ describe("buildAttentionItems", () => {
       },
     ]);
 
-    assert.equal(text, "⏳Cl projects/mjjo allow │ 🤔Cx v/vos-data-service 26s");
+    assert.equal(text, "⏳Cl mjjo allow │ 🤔Cx vos-data-service 26s");
+  });
+
+  it("keeps parent context when repo names overlap", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const text = buildAttentionFocusText([
+      {
+        kind: "thinking",
+        priority: 1,
+        pid: 10,
+        agentName: "Claude Code",
+        cwd: "/Users/macrent/Documents/team-a/app",
+        status: "Active",
+        phase: "thinking",
+        lastActivityAt: now - 12,
+      },
+      {
+        kind: "tool",
+        priority: 2,
+        pid: 20,
+        agentName: "Codex",
+        cwd: "/Users/macrent/Documents/team-b/app",
+        status: "Active",
+        phase: "tool",
+        lastActivityAt: now - 7,
+      },
+    ]);
+
+    assert.equal(text, "🤔Cl team-a/app 12s │ 🔧Cx team-b/app 7s");
   });
 
   it("reduces focus item count on narrow widths before truncating everything", () => {
@@ -912,7 +966,7 @@ describe("buildAttentionItems", () => {
       60,
     );
 
-    assert.equal(text, "⏳Cl p/mjjo allow");
+    assert.equal(text, "⏳Cl mjjo allow");
   });
 
   it("returns undefined when only unmatched items exist", () => {
@@ -981,13 +1035,36 @@ describe("buildAttentionItems", () => {
       5,
     );
 
-    assert.match(text, / 1 /);
-    assert.match(text, /⏳Cl projects\/mjjo allow/);
-    assert.match(text, / 2 /);
-    assert.match(text, /🤔Cl projects\/kbank 26s/);
-    assert.match(text, / 3 /);
-    assert.match(text, /•Cx v\/vos-data-service 10s/);
+    assert.match(text, /1 ⏳Cl mjjo allow/);
+    assert.match(text, /⏳Cl mjjo allow/);
+    assert.match(text, /2 🤔Cl kbank 26s/);
+    assert.match(text, /🤔Cl kbank 26s/);
+    assert.match(text, /3 •Cx vos-data-service 10s/);
+    assert.match(text, /•Cx vos-data-service 10s/);
+    assert.match(text, /#\[fg=/);
+    assert.doesNotMatch(text, /#\[bold,fg=/);
+  });
+
+  it("keeps pill attention style available as an option", () => {
+    const text = buildTmuxAttentionPills(
+      [
+        {
+          kind: "permission",
+          priority: 1,
+          pid: 30,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/.ai/projects/mjjo",
+          status: "Active",
+          phase: "permission",
+        },
+      ],
+      5,
+      undefined,
+      "pill",
+    );
+
     assert.match(text, /#\[bold,fg=/);
+    assert.match(text, //);
   });
 
   it("shows no active when no attention items exist", () => {
@@ -1058,7 +1135,7 @@ describe("buildAttentionItems", () => {
       60,
     );
 
-    assert.match(text, /⏳Cl p\/mjjo allow/);
+    assert.match(text, /⏳Cl mjjo allow/);
     assert.doesNotMatch(text, /🤔Cl/);
     assert.doesNotMatch(text, /•Cx/);
   });

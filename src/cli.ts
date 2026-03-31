@@ -156,10 +156,11 @@ function buildHelpAppendix(): string {
     `Config location: ${getConfigDir()}/settings.json`,
     "Common settings:",
     "  display.attentionLimit / display.statuslineAttentionLimit",
-    "  integration.tmux.keys.*",
+    "  integration.tmux.badgeStyle / integration.tmux.keys.*",
     "  paths.* (runtime data path overrides)",
     "",
     "Shortcuts can be customized in settings.json:",
+    '  integration.tmux.badgeStyle = "minimal" | "pill"',
     "  integration.tmux.keys = { attentionPopup, jumpPopup, dockToggle, directJump[] }",
   ].join("\n");
 }
@@ -297,6 +298,7 @@ function buildMinimalConfigSample(): string {
       },
       integration: {
         tmux: {
+          badgeStyle: "minimal",
           keys: {
             attentionPopup: "a",
             jumpPopup: "j",
@@ -333,6 +335,7 @@ function buildAdvancedConfigSample(): string {
       },
       integration: {
         tmux: {
+          badgeStyle: "minimal",
           keys: {
             attentionPopup: "a",
             jumpPopup: "j",
