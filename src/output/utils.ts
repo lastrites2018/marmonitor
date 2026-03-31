@@ -251,6 +251,13 @@ export interface AttentionItem {
   lastActivityAt?: number;
 }
 
+export interface AttentionBuildOptions {
+  nowSec?: number;
+  phaseAttentionMaxAgeSec?: number;
+}
+
+const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
+
 export interface StatusPill {
   label: string;
   fg: string;
@@ -449,16 +456,47 @@ function agentShortName(agentName: string): string {
   return agentName;
 }
 
-function attentionPriority(agent: AgentSession): number | undefined {
+function isRecentPhaseAttention(
+  agent: Pick<AgentSession, "phase" | "lastActivityAt" | "lastResponseAt" | "startedAt">,
+  nowSec: number,
+  maxAgeSec: number,
+): boolean {
+  if (agent.phase !== "thinking" && agent.phase !== "tool") return false;
+  const at = attentionActivityTime(agent);
+  if (!at) return false;
+  return nowSec - at <= maxAgeSec;
+}
+
+function attentionPriority(
+  agent: AgentSession,
+  nowSec: number,
+  phaseAttentionMaxAgeSec: number,
+): number | undefined {
   if (agent.phase === "permission") return 0;
-  if (agent.phase === "thinking") return 1;
+  if (
+    agent.phase === "thinking" &&
+    isRecentPhaseAttention(agent, nowSec, phaseAttentionMaxAgeSec)
+  ) {
+    return 1;
+  }
   return undefined;
 }
 
-function attentionKind(agent: AgentSession): AttentionKind | undefined {
+function attentionKind(
+  agent: AgentSession,
+  nowSec: number,
+  phaseAttentionMaxAgeSec: number,
+): AttentionKind | undefined {
   if (agent.phase === "permission") return "permission";
-  if (agent.phase === "thinking") return "thinking";
-  if (agent.phase === "tool") return "tool";
+  if (
+    agent.phase === "thinking" &&
+    isRecentPhaseAttention(agent, nowSec, phaseAttentionMaxAgeSec)
+  ) {
+    return "thinking";
+  }
+  if (agent.phase === "tool" && isRecentPhaseAttention(agent, nowSec, phaseAttentionMaxAgeSec)) {
+    return "tool";
+  }
   if (agent.status === "Dead" || agent.status === "Unmatched" || agent.status === "Stalled") {
     return undefined;
   }
@@ -494,7 +532,13 @@ function orderedAttentionItems(items: AttentionItem[]): AttentionItem[] {
 
 /** Build prioritized attention list for popup/jump UX.
  * Order: permission -> thinking -> recently active alive sessions. */
-export function buildAttentionItems(agents: AgentSession[]): AttentionItem[] {
+export function buildAttentionItems(
+  agents: AgentSession[],
+  options: AttentionBuildOptions = {},
+): AttentionItem[] {
+  const nowSec = options.nowSec ?? Date.now() / 1000;
+  const phaseAttentionMaxAgeSec =
+    options.phaseAttentionMaxAgeSec ?? DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC;
   const alive = agents.filter(
     (agent) =>
       agent.status !== "Dead" && agent.status !== "Unmatched" && agent.status !== "Stalled",
@@ -521,22 +565,30 @@ export function buildAttentionItems(agents: AgentSession[]): AttentionItem[] {
   });
 
   const tier1 = alive
-    .filter((agent) => attentionPriority(agent) !== undefined)
+    .filter((agent) => attentionPriority(agent, nowSec, phaseAttentionMaxAgeSec) !== undefined)
     .sort((a, b) => {
-      const aPriority = attentionPriority(a) ?? Number.MAX_SAFE_INTEGER;
-      const bPriority = attentionPriority(b) ?? Number.MAX_SAFE_INTEGER;
+      const aPriority =
+        attentionPriority(a, nowSec, phaseAttentionMaxAgeSec) ?? Number.MAX_SAFE_INTEGER;
+      const bPriority =
+        attentionPriority(b, nowSec, phaseAttentionMaxAgeSec) ?? Number.MAX_SAFE_INTEGER;
       if (aPriority !== bPriority) return aPriority - bPriority;
       return attentionActivityTime(b) - attentionActivityTime(a);
     })
     .map((agent) =>
-      toAttentionItem(agent, attentionPriority(agent) ?? 0, attentionKind(agent) ?? "active"),
+      toAttentionItem(
+        agent,
+        attentionPriority(agent, nowSec, phaseAttentionMaxAgeSec) ?? 0,
+        attentionKind(agent, nowSec, phaseAttentionMaxAgeSec) ?? "active",
+      ),
     );
 
   const tier1Pids = new Set(tier1.map((item) => item.pid));
   const tier2 = alive
     .filter((agent) => !tier1Pids.has(agent.pid))
     .sort((a, b) => attentionActivityTime(b) - attentionActivityTime(a))
-    .map((agent) => toAttentionItem(agent, 2, attentionKind(agent) ?? "active"));
+    .map((agent) =>
+      toAttentionItem(agent, 2, attentionKind(agent, nowSec, phaseAttentionMaxAgeSec) ?? "active"),
+    );
 
   return [...tier1, ...tier2];
 }
@@ -544,23 +596,28 @@ export function buildAttentionItems(agents: AgentSession[]): AttentionItem[] {
 export function selectAttentionItem(
   agents: AgentSession[],
   selection: number,
+  options: AttentionBuildOptions = {},
 ): AttentionItem | undefined {
   if (!Number.isInteger(selection) || selection < 1) return undefined;
-  return buildAttentionItems(agents)[selection - 1];
+  return buildAttentionItems(agents, options)[selection - 1];
 }
 
 /** Build jumpable attention items for interactive navigation.
  *  Statusline/jump share the same top-of-mind ordering. */
-export function buildJumpAttentionItems(agents: AgentSession[]): AttentionItem[] {
-  return orderedAttentionItems(buildAttentionItems(agents));
+export function buildJumpAttentionItems(
+  agents: AgentSession[],
+  options: AttentionBuildOptions = {},
+): AttentionItem[] {
+  return orderedAttentionItems(buildAttentionItems(agents, options));
 }
 
 export function selectJumpAttentionItem(
   agents: AgentSession[],
   selection: number,
+  options: AttentionBuildOptions = {},
 ): AttentionItem | undefined {
   if (!Number.isInteger(selection) || selection < 1) return undefined;
-  return buildJumpAttentionItems(agents)[selection - 1];
+  return buildJumpAttentionItems(agents, options)[selection - 1];
 }
 
 export function buildAttentionFocusText(

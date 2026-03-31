@@ -728,8 +728,9 @@ describe("buildStatuslineSummary", () => {
 
 describe("buildAttentionItems", () => {
   it("selects only attention-worthy agents in priority order", () => {
+    const now = 2000;
     const agents = [
-      { pid: 10, agentName: "Claude Code", cwd: "/repo/a", status: "Idle", lastActivityAt: 3000 },
+      { pid: 10, agentName: "Claude Code", cwd: "/repo/a", status: "Idle", lastActivityAt: 1500 },
       { pid: 20, agentName: "Codex", cwd: "/repo/b", status: "Unmatched", runtimeSource: "vscode" },
       { pid: 30, agentName: "Claude Code", cwd: "/repo/c", status: "Active", phase: "permission" },
       { pid: 40, agentName: "Claude Code", cwd: "/repo/d", status: "Stalled" },
@@ -739,7 +740,7 @@ describe("buildAttentionItems", () => {
         cwd: "/repo/e",
         status: "Active",
         phase: "thinking",
-        lastActivityAt: 2000,
+        lastActivityAt: 1900,
       },
       {
         pid: 60,
@@ -747,22 +748,23 @@ describe("buildAttentionItems", () => {
         cwd: "/repo/f",
         status: "Active",
         phase: "tool",
-        lastActivityAt: 1000,
+        lastActivityAt: 1800,
       },
     ];
 
     assert.deepEqual(
-      buildAttentionItems(agents).map((item) => [item.kind, item.pid]),
+      buildAttentionItems(agents, { nowSec: now }).map((item) => [item.kind, item.pid]),
       [
         ["permission", 30],
         ["thinking", 50],
-        ["active", 10],
         ["tool", 60],
+        ["active", 10],
       ],
     );
   });
 
   it("sorts same-priority items by newest activity first", () => {
+    const now = 2500;
     const agents = [
       {
         pid: 100,
@@ -783,24 +785,64 @@ describe("buildAttentionItems", () => {
     ];
 
     assert.deepEqual(
-      buildAttentionItems(agents).map((item) => item.pid),
+      buildAttentionItems(agents, { nowSec: now }).map((item) => item.pid),
       [200, 100],
     );
   });
 
+  it("downgrades stale thinking and tool sessions to regular active attention", () => {
+    const now = 5 * 60 * 60;
+    const agents = [
+      {
+        pid: 10,
+        agentName: "Claude Code",
+        cwd: "/repo/thinking",
+        status: "Idle",
+        phase: "thinking",
+        lastActivityAt: now - 4 * 60 * 60,
+      },
+      {
+        pid: 20,
+        agentName: "Codex",
+        cwd: "/repo/tool",
+        status: "Idle",
+        phase: "tool",
+        lastActivityAt: now - 3 * 60 * 60,
+      },
+      {
+        pid: 30,
+        agentName: "Claude Code",
+        cwd: "/repo/recent",
+        status: "Idle",
+        lastActivityAt: now - 10,
+      },
+    ];
+
+    assert.deepEqual(
+      buildAttentionItems(agents, { nowSec: now }).map((item) => [item.kind, item.pid]),
+      [
+        ["active", 30],
+        ["active", 20],
+        ["active", 10],
+      ],
+    );
+  });
+
   it("selects an attention item by 1-based index", () => {
+    const now = 1000;
     const agents = [
       { pid: 20, agentName: "Codex", cwd: "/repo/b", status: "Unmatched" },
       { pid: 30, agentName: "Claude Code", cwd: "/repo/c", status: "Active", phase: "permission" },
       { pid: 40, agentName: "Codex", cwd: "/repo/d", status: "Idle", lastActivityAt: 1000 },
     ];
 
-    assert.equal(selectAttentionItem(agents, 1)?.pid, 30);
-    assert.equal(selectAttentionItem(agents, 2)?.pid, 40);
-    assert.equal(selectAttentionItem(agents, 3), undefined);
+    assert.equal(selectAttentionItem(agents, 1, { nowSec: now })?.pid, 30);
+    assert.equal(selectAttentionItem(agents, 2, { nowSec: now })?.pid, 40);
+    assert.equal(selectAttentionItem(agents, 3, { nowSec: now }), undefined);
   });
 
   it("builds jump attention items with permission/thinking first, then recent alive sessions", () => {
+    const now = 2000;
     const agents = [
       { pid: 20, agentName: "Codex", cwd: "/repo/b", status: "Unmatched" },
       {
@@ -817,7 +859,7 @@ describe("buildAttentionItems", () => {
         cwd: "/repo/t",
         status: "Active",
         phase: "thinking",
-        lastActivityAt: 2000,
+        lastActivityAt: 1900,
       },
       { pid: 40, agentName: "Codex", cwd: "/repo/d", status: "Stalled" },
       {
@@ -826,32 +868,33 @@ describe("buildAttentionItems", () => {
         cwd: "/repo/e",
         status: "Active",
         phase: "tool",
-        lastActivityAt: 1500,
+        lastActivityAt: 1800,
       },
-      { pid: 60, agentName: "Claude Code", cwd: "/repo/f", status: "Idle", lastActivityAt: 2500 },
+      { pid: 60, agentName: "Claude Code", cwd: "/repo/f", status: "Idle", lastActivityAt: 1700 },
     ];
 
     assert.deepEqual(
-      buildJumpAttentionItems(agents).map((item) => [item.kind, item.pid]),
+      buildJumpAttentionItems(agents, { nowSec: now }).map((item) => [item.kind, item.pid]),
       [
         ["permission", 30],
         ["thinking", 35],
-        ["active", 60],
         ["tool", 50],
+        ["active", 60],
       ],
     );
   });
 
   it("selects a jump attention item by 1-based index", () => {
+    const now = 1000;
     const agents = [
       { pid: 20, agentName: "Codex", cwd: "/repo/b", status: "Unmatched" },
       { pid: 30, agentName: "Claude Code", cwd: "/repo/c", status: "Active", phase: "permission" },
       { pid: 40, agentName: "Codex", cwd: "/repo/d", status: "Idle", lastActivityAt: 1000 },
     ];
 
-    assert.equal(selectJumpAttentionItem(agents, 1)?.pid, 30);
-    assert.equal(selectJumpAttentionItem(agents, 2)?.pid, 40);
-    assert.equal(selectJumpAttentionItem(agents, 3), undefined);
+    assert.equal(selectJumpAttentionItem(agents, 1, { nowSec: now })?.pid, 30);
+    assert.equal(selectJumpAttentionItem(agents, 2, { nowSec: now })?.pid, 40);
+    assert.equal(selectJumpAttentionItem(agents, 3, { nowSec: now }), undefined);
   });
 
   it("keeps thinking first, then recent alive sessions in condensed focus text", () => {
