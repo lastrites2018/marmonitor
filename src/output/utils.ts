@@ -88,15 +88,17 @@ function statuslineRepoLabel(cwd: string): string {
 
 function buildStatuslinePathLabels(items: Array<{ cwd: string }>, maxLength: number): string[] {
   const repoLabels = items.map((item) => statuslineRepoLabel(item.cwd));
-  const counts = new Map<string, number>();
+  const cwdSets = new Map<string, Set<string>>();
 
-  for (const label of repoLabels) {
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+  for (const [index, label] of repoLabels.entries()) {
+    const existing = cwdSets.get(label) ?? new Set<string>();
+    existing.add(items[index].cwd);
+    cwdSets.set(label, existing);
   }
 
   return items.map((item, index) => {
     const repoLabel = repoLabels[index];
-    if ((counts.get(repoLabel) ?? 0) === 1) {
+    if ((cwdSets.get(repoLabel)?.size ?? 0) <= 1) {
       return truncateMiddle(repoLabel, maxLength);
     }
     return compactStatuslineDirLabel(item.cwd, maxLength);
@@ -229,7 +231,7 @@ export type StatuslineFormat =
   | "tmux-badges"
   | "wezterm-pills";
 
-export type TmuxBadgeStyle = "minimal" | "pill";
+export type TmuxBadgeStyle = "plain" | "minimal" | "pill";
 
 export type AttentionKind = "unmatched" | "permission" | "stalled" | "thinking" | "tool" | "active";
 
@@ -763,25 +765,27 @@ function tmuxAttentionSegmentMinimal(
 export function buildTmuxBadgeBar(
   snapshot: StatuslineSnapshot,
   focusText?: string,
-  style: TmuxBadgeStyle = "minimal",
+  style: TmuxBadgeStyle = "plain",
 ): string {
   const { agents, alerts } = buildStatusPills(snapshot);
   const agentPills =
     style === "pill"
       ? agents.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
-      : agents.map((pill) => tmuxTextAccent(pill.label, pill.bg));
+      : style === "minimal"
+        ? agents.map((pill) => tmuxTextAccent(pill.label, pill.bg))
+        : agents.map((pill) => pill.label);
   const alertPills =
     style === "pill"
       ? alerts.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
-      : alerts.map((pill) => tmuxTextAccent(pill.label, pill.bg));
+      : style === "minimal"
+        ? alerts.map((pill) => tmuxTextAccent(pill.label, pill.bg))
+        : alerts.map((pill) => pill.label);
   const focus =
     style === "pill"
       ? focusText
         ? `#[fg=#bac2de,bg=#181825] ${focusText} #[default]`
         : ""
-      : focusText
-        ? focusText
-        : "";
+      : (focusText ?? "");
   return [agentPills.join(" "), alertPills.join(" "), focus].filter(Boolean).join("  ");
 }
 
@@ -789,7 +793,7 @@ export function buildTmuxAttentionPills(
   items: AttentionItem[],
   maxCount = 5,
   width?: number,
-  style: TmuxBadgeStyle = "minimal",
+  style: TmuxBadgeStyle = "plain",
 ): string | undefined {
   if (maxCount <= 0) return undefined;
   const layout = resolveStatuslineDetailLayout(width, maxCount);
@@ -802,7 +806,11 @@ export function buildTmuxAttentionPills(
   const pathLabels = buildStatuslinePathLabels(jumpItems, layout.pathMaxLength);
 
   if (jumpItems.length === 0) {
-    return style === "pill" ? tmuxDetailBlock("no active") : tmuxTextAccent("no active", "#bac2de");
+    return style === "pill"
+      ? tmuxDetailBlock("no active")
+      : style === "minimal"
+        ? tmuxTextAccent("no active", "#bac2de")
+        : "no active";
   }
 
   const segments = jumpItems.map((item, index) => {
@@ -829,7 +837,9 @@ export function buildTmuxAttentionPills(
                 : `⚠${agent} ${path}`;
     return style === "pill"
       ? tmuxAttentionSegment(index + 1, item.kind, label)
-      : tmuxAttentionSegmentMinimal(index + 1, item.kind, label);
+      : style === "minimal"
+        ? tmuxAttentionSegmentMinimal(index + 1, item.kind, label)
+        : `${index + 1} ${label}`;
   });
 
   return segments.join("  ");

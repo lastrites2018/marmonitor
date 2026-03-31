@@ -38,7 +38,7 @@ async function writeRenderedStatuslines(
   formats: StatuslineFormat[],
   attentionLimit: number,
   width: number | undefined,
-  tmuxBadgeStyle: "minimal" | "pill",
+  tmuxBadgeStyle: "plain" | "minimal" | "pill",
 ): Promise<void> {
   for (const format of formats) {
     const rendered = await renderStatusline(snapshot, format, attentionLimit, width, {

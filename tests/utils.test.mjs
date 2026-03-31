@@ -593,7 +593,7 @@ describe("buildStatuslineSummary", () => {
     );
   });
 
-  it("builds minimal tmux badge bar by default", () => {
+  it("builds plain tmux badge bar by default", () => {
     const text = buildTmuxBadgeBar(
       {
         aliveCount: 19,
@@ -619,6 +619,31 @@ describe("buildStatuslineSummary", () => {
     assert.match(text, /🤔 3/);
     assert.match(text, /🔧 1/);
     assert.match(text, /Claude mjjo allow/);
+    assert.doesNotMatch(text, /#\[fg=/);
+    assert.doesNotMatch(text, //);
+    assert.doesNotMatch(text, /bg=#fab387/);
+  });
+
+  it("keeps minimal badge style available as an option", () => {
+    const text = buildTmuxBadgeBar(
+      {
+        aliveCount: 19,
+        waitingCount: 2,
+        riskCount: 0,
+        stalledCount: 1,
+        unmatchedCount: 1,
+        activeCount: 8,
+        highCpuCount: 1,
+        thinkingCount: 3,
+        toolCount: 1,
+        claudeCount: 14,
+        codexCount: 2,
+        geminiCount: 3,
+      },
+      "⏳ Claude mjjo allow",
+      "minimal",
+    );
+
     assert.match(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
     assert.doesNotMatch(text, /bg=#fab387/);
@@ -929,6 +954,38 @@ describe("buildAttentionItems", () => {
     assert.equal(text, "🤔Cl team-a/app 12s │ 🔧Cx team-b/app 7s");
   });
 
+  it("keeps repo-only labels when duplicate entries point to the same cwd", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const text = buildAttentionFocusText(
+      [
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 10,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/jaewan-develop/roam-new",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 60,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 20,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/jaewan-develop/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 30,
+        },
+      ],
+      5,
+      150,
+    );
+
+    assert.match(text ?? "", /roam-new/);
+    assert.doesNotMatch(text ?? "", /jaewan-develop\/roam-new/);
+  });
+
   it("reduces focus item count on narrow widths before truncating everything", () => {
     const now = Math.floor(Date.now() / 1000);
     const text = buildAttentionFocusText(
@@ -999,7 +1056,7 @@ describe("buildAttentionItems", () => {
     assert.equal(text, undefined);
   });
 
-  it("builds numbered tmux attention pills for direct jump", () => {
+  it("builds plain numbered tmux attention segments for direct jump by default", () => {
     const now = Math.floor(Date.now() / 1000);
     const text = buildTmuxAttentionPills(
       [
@@ -1041,8 +1098,30 @@ describe("buildAttentionItems", () => {
     assert.match(text, /🤔Cl kbank 26s/);
     assert.match(text, /3 •Cx vos-data-service 10s/);
     assert.match(text, /•Cx vos-data-service 10s/);
-    assert.match(text, /#\[fg=/);
+    assert.doesNotMatch(text, /#\[fg=/);
     assert.doesNotMatch(text, /#\[bold,fg=/);
+  });
+
+  it("keeps minimal attention style available as an option", () => {
+    const text = buildTmuxAttentionPills(
+      [
+        {
+          kind: "permission",
+          priority: 1,
+          pid: 30,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/.ai/projects/mjjo",
+          status: "Active",
+          phase: "permission",
+        },
+      ],
+      5,
+      undefined,
+      "minimal",
+    );
+
+    assert.match(text, /#\[fg=/);
+    assert.doesNotMatch(text, //);
   });
 
   it("keeps pill attention style available as an option", () => {

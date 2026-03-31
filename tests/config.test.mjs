@@ -43,7 +43,7 @@ describe("getDefaults", () => {
     assert.equal(config.intervention.enabled, false);
     assert.equal(config.intervention.mode, "alert");
     assert.equal(config.intervention.defaultAction, "alert");
-    assert.equal(config.integration.tmux.badgeStyle, "minimal");
+    assert.equal(config.integration.tmux.badgeStyle, "plain");
     assert.equal(config.integration.tmux.keys.attentionPopup, "a");
     assert.equal(config.integration.tmux.keys.jumpPopup, "j");
     assert.equal(config.integration.tmux.keys.dockToggle, "m");
@@ -159,7 +159,7 @@ describe("loadConfig", () => {
       assert.equal(config.display.attentionLimit, 7);
       assert.equal(config.display.statuslineAttentionLimit, 4);
       assert.equal(config.intervention.enabled, false);
-      assert.equal(config.integration.tmux.badgeStyle, "minimal");
+      assert.equal(config.integration.tmux.badgeStyle, "plain");
       assert.equal(config.integration.tmux.keys.attentionPopup, "a");
       assert.equal(config.integration.wezterm.enabled, false);
       assert.equal(config.integration.wezterm.statusTtlSec, 15);

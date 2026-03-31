@@ -551,7 +551,7 @@ export async function renderStatusline(
     };
 
     if (format === "tmux-badges") {
-      const style = options.tmuxBadgeStyle ?? "minimal";
+      const style = options.tmuxBadgeStyle ?? "plain";
       const focusText = buildTmuxAttentionPills(
         buildJumpAttentionItems(agents),
         attentionLimit,

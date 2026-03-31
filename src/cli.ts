@@ -160,7 +160,7 @@ function buildHelpAppendix(): string {
     "  paths.* (runtime data path overrides)",
     "",
     "Shortcuts can be customized in settings.json:",
-    '  integration.tmux.badgeStyle = "minimal" | "pill"',
+    '  integration.tmux.badgeStyle = "plain" | "minimal" | "pill"',
     "  integration.tmux.keys = { attentionPopup, jumpPopup, dockToggle, directJump[] }",
   ].join("\n");
 }
@@ -298,7 +298,7 @@ function buildMinimalConfigSample(): string {
       },
       integration: {
         tmux: {
-          badgeStyle: "minimal",
+          badgeStyle: "plain",
           keys: {
             attentionPopup: "a",
             jumpPopup: "j",
@@ -335,7 +335,7 @@ function buildAdvancedConfigSample(): string {
       },
       integration: {
         tmux: {
-          badgeStyle: "minimal",
+          badgeStyle: "plain",
           keys: {
             attentionPopup: "a",
             jumpPopup: "j",
