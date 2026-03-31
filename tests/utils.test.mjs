@@ -1092,12 +1092,9 @@ describe("buildAttentionItems", () => {
       5,
     );
 
-    assert.match(text, /1 ⏳Cl mjjo allow/);
-    assert.match(text, /⏳Cl mjjo allow/);
-    assert.match(text, /2 🤔Cl kbank 26s/);
-    assert.match(text, /🤔Cl kbank 26s/);
-    assert.match(text, /3 •Cx vos-data-service 10s/);
-    assert.match(text, /•Cx vos-data-service 10s/);
+    assert.match(text, /#\[range=user\|pid:30]1 ⏳Cl mjjo allow#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:50]2 🤔Cl kbank 26s#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:60]3 •Cx vos-data-service 10s#\[norange]/);
     assert.doesNotMatch(text, /#\[fg=/);
     assert.doesNotMatch(text, /#\[bold,fg=/);
   });
@@ -1120,6 +1117,7 @@ describe("buildAttentionItems", () => {
       "minimal",
     );
 
+    assert.match(text, /#\[range=user\|pid:30]/);
     assert.match(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
   });
@@ -1142,6 +1140,7 @@ describe("buildAttentionItems", () => {
       "pill",
     );
 
+    assert.match(text, /#\[range=user\|pid:30]/);
     assert.match(text, /#\[bold,fg=/);
     assert.match(text, //);
   });

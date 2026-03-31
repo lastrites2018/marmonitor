@@ -733,6 +733,10 @@ function tmuxTextAccent(label: string, color: string): string {
   return `#[fg=${color}]${label}#[default]`;
 }
 
+function tmuxUserRange(value: string, content: string): string {
+  return `#[range=user|${value}]${content}#[norange]`;
+}
+
 function tmuxDetailBlock(label: string): string {
   return `#[fg=#cdd6f4,bg=#313244] ${label} #[fg=#313244,bg=#1e1e2e]#[default]`;
 }
@@ -835,11 +839,13 @@ export function buildTmuxAttentionPills(
               : time
                 ? `⚠${agent} ${path} ${time}`
                 : `⚠${agent} ${path}`;
-    return style === "pill"
-      ? tmuxAttentionSegment(index + 1, item.kind, label)
-      : style === "minimal"
-        ? tmuxAttentionSegmentMinimal(index + 1, item.kind, label)
-        : `${index + 1} ${label}`;
+    const content =
+      style === "pill"
+        ? tmuxAttentionSegment(index + 1, item.kind, label)
+        : style === "minimal"
+          ? tmuxAttentionSegmentMinimal(index + 1, item.kind, label)
+          : `${index + 1} ${label}`;
+    return tmuxUserRange(`pid:${item.pid}`, content);
   });
 
   return segments.join("  ");
