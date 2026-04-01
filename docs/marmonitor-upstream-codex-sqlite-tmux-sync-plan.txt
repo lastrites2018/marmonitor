@@ -57,6 +57,23 @@ Phase 0. benchmark-first 진입 기준
   - 반대로 live full scan에서는 Codex 경로가 크므로, scanner 비실시간 경로 최적화 후보로는 가치가 있다.
   - 따라서 이 작업은 statusline hot path 최적화가 아니라, `status`/collector 갱신 경로 최적화로만 평가한다.
 
+Phase 0 결과 기록
+- 2026-04-02에 `threads -> rollout_path -> JSONL enrich` 형태의 discovery-only 시도를 실제로 구현해 측정했다.
+- 결과는 유지하지 않았다.
+  - 초기 구현:
+    - `status total`: 약 `9129.7ms`
+    - `codex.indexCodexSessions`: 약 `6946.8ms`
+  - 최근 7일 윈도우를 맞춘 뒤:
+    - `status total`: 약 `6826.5ms`
+    - `codex.indexCodexSessions`: 약 `5770.7ms`
+- baseline(`status total 3680.6ms`, `codex.indexCodexSessions 1922.5ms`)보다 크게 나빠졌기 때문에 코드에는 남기지 않았다.
+- 관찰된 원인
+  - SQLite discovery 자체보다, full 경로에서 discovery된 rollout JSONL을 다시 폭넓게 읽는 token/phase 보강 비용이 더 컸다.
+  - 즉 현재 구조에서는 "발견"만 바꿔도 full scan 전체는 빨라지지 않았다.
+- 다음에 다시 시도할 때의 제약
+  - full scan 대체로 바로 들어가지 않는다.
+  - 먼저 light/collector 경로처럼 더 좁은 목표 경로를 정하고, 그 경로의 benchmark가 실제로 좋아질 때만 유지한다.
+
 현재 구조
 - `src/scanner/codex.ts`
   - 기본적으로 `~/.codex/sessions/YYYY/MM/DD/*.jsonl`를 최근 7일 범위로 순회한다.
