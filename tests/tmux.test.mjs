@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildTmuxAnchorReturnCommands,
   buildTmuxPaneJumpCommands,
   getTmuxRuntimeSnapshot,
   isPidInTree,
   parseProcessTree,
+  parseTmuxClientLocation,
   parseTmuxPanes,
   resetTmuxRuntimeSnapshotForTests,
   resolveTmuxJumpTarget,
@@ -38,6 +40,16 @@ describe("parseTmuxPanes", () => {
     const panes = parseTmuxPanes("bad-line\nmjjo:1.2\t1234\t/repo\n");
     assert.equal(panes.length, 1);
     assert.equal(panes[0].target, "mjjo:1.2");
+  });
+});
+
+describe("parseTmuxClientLocation", () => {
+  it("falls back to client tty when tmux leaves client_id empty", () => {
+    const location = parseTmuxClientLocation("\t/dev/ttys003\t$0\tvos-fr\t@0\t1\t%0\t1\n");
+    assert.equal(location?.clientId, "/dev/ttys003");
+    assert.equal(location?.clientTty, "/dev/ttys003");
+    assert.equal(location?.sessionId, "$0");
+    assert.equal(location?.paneId, "%0");
   });
 });
 
@@ -116,6 +128,36 @@ describe("buildTmuxPaneJumpCommands", () => {
     assert.deepEqual(buildTmuxPaneJumpCommands(target, { insideTmux: false }), [
       ["select-window", "-t", "mjjo:2"],
       ["select-pane", "-t", "mjjo:2.1"],
+    ]);
+  });
+});
+
+describe("buildTmuxAnchorReturnCommands", () => {
+  const anchor = {
+    clientId: "$3",
+    originSessionId: "$1",
+    originWindowId: "@2",
+    originPaneId: "%7",
+    recordedAt: Date.now(),
+  };
+
+  it("uses an explicit target client when returning to the origin pane", () => {
+    assert.deepEqual(
+      buildTmuxAnchorReturnCommands(anchor, "pane", { targetClient: "/dev/ttys032" }),
+      [["switch-client", "-c", "/dev/ttys032", "-t", "%7"]],
+    );
+  });
+
+  it("falls back from pane to window using in-tmux commands", () => {
+    assert.deepEqual(buildTmuxAnchorReturnCommands(anchor, "window", { insideTmux: true }), [
+      ["switch-client", "-t", "@2"],
+      ["select-window", "-t", "@2"],
+    ]);
+  });
+
+  it("can return to the session when pane and window are gone", () => {
+    assert.deepEqual(buildTmuxAnchorReturnCommands(anchor, "session", { insideTmux: true }), [
+      ["switch-client", "-t", "$1"],
     ]);
   });
 });

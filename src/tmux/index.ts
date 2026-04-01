@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { profileAsync } from "../perf.js";
 import type { AgentSession } from "../types.js";
+import type { TmuxJumpAnchor } from "./jump-anchor.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +25,17 @@ export interface TmuxRuntimeSnapshot {
   childMap: Map<number, number[]>;
 }
 
+export interface TmuxClientLocation {
+  clientId: string;
+  clientTty: string;
+  sessionId: string;
+  sessionName: string;
+  windowId: string;
+  windowIndex: number;
+  paneId: string;
+  paneIndex: number;
+}
+
 interface TmuxRuntimeSnapshotLoaders {
   listPanes?: () => Promise<TmuxPane[]>;
   getProcessTree?: () => Promise<Map<number, number[]>>;
@@ -44,6 +56,17 @@ export interface TmuxJumpResult {
 export interface TmuxJumpOptions {
   targetClient?: string;
   insideTmux?: boolean;
+}
+
+export interface TmuxJumpBackResult {
+  found: boolean;
+  executed: boolean;
+  insideTmux: boolean;
+  clientId?: string;
+  level?: "pane" | "window" | "session";
+  target?: string;
+  anchorInvalid?: boolean;
+  message?: string;
 }
 
 export function parseTmuxPanes(raw: string): TmuxPane[] {
@@ -69,6 +92,44 @@ export function parseTmuxPanes(raw: string): TmuxPane[] {
       return Number.isFinite(pane.panePid) ? [pane] : [];
     })
     .filter((pane) => Number.isFinite(pane.panePid));
+}
+
+export function parseTmuxClientLocation(raw: string): TmuxClientLocation | undefined {
+  const [
+    clientIdRaw,
+    clientTty,
+    sessionId,
+    sessionName,
+    windowId,
+    windowIndexRaw,
+    paneId,
+    paneIndexRaw,
+  ] = raw.replace(/\r?\n$/, "").split("\t");
+  const clientId = clientIdRaw || clientTty;
+  const windowIndex = Number.parseInt(windowIndexRaw ?? "", 10);
+  const paneIndex = Number.parseInt(paneIndexRaw ?? "", 10);
+  if (
+    !clientId ||
+    !clientTty ||
+    !sessionId ||
+    !sessionName ||
+    !windowId ||
+    !paneId ||
+    !Number.isFinite(windowIndex) ||
+    !Number.isFinite(paneIndex)
+  ) {
+    return undefined;
+  }
+  return {
+    clientId,
+    clientTty,
+    sessionId,
+    sessionName,
+    windowId,
+    windowIndex,
+    paneId,
+    paneIndex,
+  };
 }
 
 export function parseProcessTree(raw: string): Map<number, number[]> {
@@ -156,6 +217,71 @@ export async function getProcessTree(): Promise<Map<number, number[]>> {
   }
 }
 
+export async function listTmuxClientIds(): Promise<string[]> {
+  try {
+    const { stdout } = await profileAsync("tmux", "list_clients", () =>
+      execFileAsync("tmux", [
+        "list-clients",
+        "-F",
+        "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+      ]),
+    );
+    return stdout
+      .split("\n")
+      .map((line) => parseTmuxClientLocation(line))
+      .flatMap((location) => (location ? [location.clientId] : []));
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveTmuxClientLocation(
+  options: TmuxJumpOptions = {},
+): Promise<TmuxClientLocation | undefined> {
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
+  if (!options.targetClient && !insideTmux) {
+    return undefined;
+  }
+
+  if (options.targetClient) {
+    try {
+      const { stdout } = await profileAsync("tmux", "list_clients", () =>
+        execFileAsync("tmux", [
+          "list-clients",
+          "-F",
+          "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+        ]),
+      );
+      const location = stdout
+        .split("\n")
+        .map((line) => parseTmuxClientLocation(line))
+        .find((candidate) => candidate?.clientTty === options.targetClient);
+      if (location) {
+        return location;
+      }
+    } catch {
+      // fall through to direct display-message resolution
+    }
+  }
+
+  const args = ["display-message", "-p"];
+  if (options.targetClient) {
+    args.push("-t", options.targetClient);
+  }
+  args.push(
+    "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+  );
+
+  try {
+    const { stdout } = await profileAsync("tmux", "resolve_client_location", () =>
+      execFileAsync("tmux", args),
+    );
+    return parseTmuxClientLocation(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getTmuxRuntimeSnapshot(
   loaders: TmuxRuntimeSnapshotLoaders = {},
 ): Promise<TmuxRuntimeSnapshot> {
@@ -237,21 +363,26 @@ export function buildTmuxPaneJumpCommands(
   ];
 }
 
+function executeTmuxCommands(commands: string[][]): Promise<boolean> {
+  return (async () => {
+    try {
+      for (const argv of commands) {
+        const label = argv[0].replace(/-/g, "_");
+        await profileAsync("tmux", label, () => execFileAsync("tmux", argv));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+}
+
 export async function jumpToTmuxPane(
   target: TmuxJumpTarget,
   options: TmuxJumpOptions = {},
 ): Promise<boolean> {
   const commands = buildTmuxPaneJumpCommands(target, options);
-
-  try {
-    for (const argv of commands) {
-      const label = argv[0].replace(/-/g, "_");
-      await profileAsync("tmux", label, () => execFileAsync("tmux", argv));
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return await executeTmuxCommands(commands);
 }
 
 export async function jumpToAgent(
@@ -284,5 +415,86 @@ export async function jumpToAgent(
     message: executed
       ? `Switched to ${target.pane.target} via ${target.match}.`
       : `Matched ${target.pane.target} via ${target.match}, but tmux switch failed.`,
+  };
+}
+
+export function buildTmuxAnchorReturnCommands(
+  anchor: TmuxJumpAnchor,
+  level: "pane" | "window" | "session",
+  options: TmuxJumpOptions = {},
+): string[][] {
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
+  const target =
+    level === "pane"
+      ? anchor.originPaneId
+      : level === "window"
+        ? anchor.originWindowId
+        : anchor.originSessionId;
+
+  if (options.targetClient) {
+    return [["switch-client", "-c", options.targetClient, "-t", target]];
+  }
+
+  if (level === "session") {
+    return [["switch-client", "-t", target]];
+  }
+
+  if (insideTmux) {
+    const commands = [["switch-client", "-t", anchor.originWindowId]];
+    if (level === "window") {
+      commands.push(["select-window", "-t", anchor.originWindowId]);
+      return commands;
+    }
+    commands.push(["select-window", "-t", anchor.originWindowId]);
+    commands.push(["select-pane", "-t", anchor.originPaneId]);
+    return commands;
+  }
+
+  if (level === "window") {
+    return [["select-window", "-t", anchor.originWindowId]];
+  }
+
+  return [
+    ["select-window", "-t", anchor.originWindowId],
+    ["select-pane", "-t", anchor.originPaneId],
+  ];
+}
+
+export async function jumpBackToTmuxAnchor(
+  anchor: TmuxJumpAnchor,
+  options: TmuxJumpOptions = {},
+): Promise<TmuxJumpBackResult> {
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
+
+  for (const level of ["pane", "window", "session"] as const) {
+    const commands = buildTmuxAnchorReturnCommands(anchor, level, options);
+    if (commands.length === 0) continue;
+    const executed = await executeTmuxCommands(commands);
+    if (executed) {
+      const target =
+        level === "pane"
+          ? anchor.originPaneId
+          : level === "window"
+            ? anchor.originWindowId
+            : anchor.originSessionId;
+      return {
+        found: true,
+        executed: true,
+        insideTmux,
+        clientId: anchor.clientId,
+        level,
+        target,
+        message: `Returned to ${target} via ${level}.`,
+      };
+    }
+  }
+
+  return {
+    found: true,
+    executed: false,
+    insideTmux,
+    clientId: anchor.clientId,
+    anchorInvalid: true,
+    message: "Recorded jump origin is no longer available.",
   };
 }

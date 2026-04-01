@@ -37,7 +37,8 @@ import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
-import { captureTmuxPaneOutput, jumpToAgent, resolveTmuxJumpTarget } from "./tmux/index.js";
+import { captureTmuxPaneOutput, resolveTmuxJumpTarget } from "./tmux/index.js";
+import { jumpBackForClient, jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
 import { VERSION } from "./version.js";
 
@@ -113,6 +114,7 @@ function buildHelpAppendix(): string {
     "  --statusline  Status bar output for tmux",
     "  collector     Light snapshot collector lifecycle commands",
     "  clean         Review or kill unmatched leftovers",
+    "  jump-back     Return to the first pre-jump tmux location for this client",
     "  debug-phase   Inspect raw phase signals for one PID",
     "  guard         Claude hook evaluator; fail-open on malformed input/errors",
     "  settings-*    Locate, inspect, or initialize settings.json",
@@ -579,7 +581,7 @@ program
         console.error(`AI session not found for pid ${item.pid}.`);
         process.exit(1);
       }
-      const result = await jumpToAgent(agent);
+      const result = await jumpToAgentWithAnchor(agent);
       printJumpResult(result);
       if (!result.found) process.exit(1);
       return;
@@ -749,6 +751,7 @@ program
   .option("--pid <pid>", "AI process PID")
   .option("--attention", "Choose from attention items interactively")
   .option("--attention-index <n>", "Jump to Nth jumpable attention item")
+  .option("--client-tty <tty>", "tmux client tty to target explicitly")
   .option("--json", "Output as JSON")
   .option("--config <path>", "Path to settings.json")
   .action(async (opts) => {
@@ -830,13 +833,43 @@ program
       process.exit(1);
     }
 
-    const result = await jumpToAgent(agent);
+    const result = await jumpToAgentWithAnchor(agent, {
+      targetClient: typeof opts.clientTty === "string" ? opts.clientTty : undefined,
+    });
     if (opts.json) {
       printJumpJson(result);
     } else {
       printJumpResult(result);
     }
     if (!result.found) process.exit(1);
+  });
+
+program
+  .command("jump-back")
+  .description("Return to the first tmux location before the current jump sequence")
+  .option("--client-tty <tty>", "tmux client tty to target explicitly")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const result = await jumpBackForClient({
+      targetClient: typeof opts.clientTty === "string" ? opts.clientTty : undefined,
+    });
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (!result.found) {
+      console.log(result.message ?? "No jump origin is recorded for this tmux client.");
+      return;
+    }
+
+    if (!result.executed) {
+      console.log(result.message ?? "Jump-back failed.");
+      process.exit(1);
+    }
+
+    console.log(result.message ?? `Returned via ${result.level ?? "pane"}.`);
   });
 
 program

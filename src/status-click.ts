@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
 import { loadConfig, resolveConfigPath } from "./config/index.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
-import { jumpToAgent } from "./tmux/index.js";
+import { jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
 
 export function extractPidFromStatusRange(value: string | undefined): string | undefined {
@@ -85,7 +85,7 @@ export async function runStatusClick(args: string[] = process.argv.slice(2)): Pr
   const agent = findClickedAgent(sessions, pid);
   if (!agent) return 1;
 
-  const result = await jumpToAgent(agent, {
+  const result = await jumpToAgentWithAnchor(agent, {
     targetClient: options.targetClient,
     insideTmux: true,
   });
