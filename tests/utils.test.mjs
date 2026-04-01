@@ -7,10 +7,12 @@ import {
   buildIdleRightRail,
   buildJumpAttentionItems,
   buildStatusPills,
+  buildStatuslineRealtimeView,
   buildStatuslineSummary,
   buildTmuxAttentionPills,
   buildTmuxBadgeBar,
   buildTmuxBadgeSummary,
+  buildTmuxIdleRightRail,
   compactStatuslineDirLabel,
   cwdToProjectDirName,
   detectApprovalPromptPhase,
@@ -1387,24 +1389,125 @@ describe("idle right rail", () => {
         { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: 100 },
         { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: 99 },
         { pid: 3, agent: "codex", cwd: "/repo/c", label: "fmbattle", lastAt: 98 },
+        { pid: 4, agent: "claude", cwd: "/repo/d", label: "ghostty", lastAt: 97 },
+        { pid: 5, agent: "codex", cwd: "/repo/e", label: "vos-proto", lastAt: 96 },
       ],
     };
 
-    assert.equal(buildIdleRightRail(snapshot, 170, 80), "idle Cl2 Cx3 | marmonitor · roam-new · fmbattle");
+    assert.equal(
+      buildIdleRightRail(snapshot, 220, 200),
+      "idle Cl2 Cx3 | marmonitor · roam-new · fmbattle · ghostty · vos-proto",
+    );
     assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle Cl2 Cx3");
     assert.equal(buildIdleRightRail(snapshot, 130, 7), "idle 5");
     assert.equal(buildIdleRightRail(snapshot, 80, 80), undefined);
     assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
   });
 
+  it("separates idle popup ranges from direct idle session jumps in tmux rail", () => {
+    const snapshot = {
+      total: 2,
+      claudeCount: 1,
+      codexCount: 1,
+      entries: [
+        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: 100 },
+        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: 99 },
+      ],
+    };
+
+    assert.equal(
+      buildTmuxIdleRightRail(snapshot, 220, 200),
+      "#[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:1]marmonitor#[norange] · #[range=user|pid:2]roam-new#[norange]",
+    );
+    assert.equal(
+      buildTmuxIdleRightRail(snapshot, 130, 20),
+      "#[range=user|sum:idle]idle Cl1 Cx1#[norange]",
+    );
+    assert.equal(
+      buildTmuxIdleRightRail(snapshot, 130, 7),
+      "#[range=user|sum:idle]idle 2#[norange]",
+    );
+  });
+
   it("joins left and right rails without counting tmux markup in visible width", () => {
-    const left = "#[range=user|sum:codex]Cx 3#[norange]  #[range=user|pid:10]1 Cx repo 5s#[norange]";
+    const left =
+      "#[range=user|sum:codex]Cx 3#[norange]  #[range=user|pid:10]1 Cx repo 5s#[norange]";
     const right = "idle Cl1 Cx2";
     assert.equal(visibleTextWidth(left), "Cx 3  1 Cx repo 5s".length);
     assert.equal(
       joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 4),
       `${left}    ${right}`,
     );
-    assert.equal(joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 1), left);
+    assert.equal(
+      joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 1),
+      left,
+    );
+  });
+});
+
+describe("buildStatuslineRealtimeView", () => {
+  it("builds shared statusline derivations from one realtime pass", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const view = buildStatuslineRealtimeView(
+      [
+        {
+          pid: 10,
+          agentName: "Claude Code",
+          cwd: "/repo/a",
+          status: "Active",
+          phase: "permission",
+          cpuPercent: 0,
+          memoryMb: 100,
+          lastActivityAt: now - 5,
+        },
+        {
+          pid: 11,
+          agentName: "Codex",
+          cwd: "/repo/b",
+          status: "Idle",
+          phase: "thinking",
+          cpuPercent: 0,
+          memoryMb: 100,
+          lastActivityAt: now - 10,
+        },
+        {
+          pid: 12,
+          agentName: "Codex",
+          cwd: "/repo/c",
+          status: "Idle",
+          cpuPercent: 0,
+          memoryMb: 100,
+          lastActivityAt: now - 20,
+        },
+        {
+          pid: 13,
+          agentName: "Gemini",
+          cwd: "/repo/d",
+          status: "Unmatched",
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+      ],
+      { includeFocusItems: true, includeIdleSnapshot: true, nowSec: now },
+    );
+
+    assert.equal(view.snapshot.aliveCount, 3);
+    assert.equal(view.snapshot.unmatchedCount, 1);
+    assert.equal(view.snapshot.waitingCount, 1);
+    assert.equal(view.snapshot.thinkingCount, 1);
+    assert.equal(view.snapshot.toolCount, 0);
+    assert.equal(view.snapshot.claudeCount, 1);
+    assert.equal(view.snapshot.codexCount, 2);
+    assert.equal(view.snapshot.geminiCount, 0);
+    assert.deepEqual(
+      view.jumpItems?.map((item) => [item.kind, item.pid]),
+      [
+        ["permission", 10],
+        ["thinking", 11],
+        ["active", 12],
+      ],
+    );
+    assert.equal(view.idleSnapshot?.total, 1);
+    assert.equal(view.idleSnapshot?.entries[0].pid, 12);
   });
 });

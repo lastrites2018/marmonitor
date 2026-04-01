@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import * as si from "systeminformation";
 import { profileAsync } from "../perf.js";
-import { buildSummaryPopupSelections } from "../summary-popup/model.js";
 import type { TmuxJumpResult } from "../tmux/index.js";
 import type {
   AgentSession,
@@ -15,17 +14,16 @@ import {
   type TmuxBadgeStyle,
   buildAttentionFocusText,
   buildAttentionItems,
-  buildIdleRightRail,
   buildJumpAttentionItems,
+  buildStatuslineRealtimeView,
   buildStatuslineSummary,
   buildTmuxAttentionPills,
   buildTmuxBadgeBar,
+  buildTmuxIdleRightRail,
   compactDirLabel,
   formatElapsed,
   formatTokens,
-  makeTmuxSummaryRange,
   joinLeftAndRightRail,
-  selectIdleSessionsForRightRail,
   serializeWeztermPills,
   shortenPath,
   visibleTextWidth,
@@ -526,59 +524,36 @@ export async function renderStatusline(
   options: StatuslineRenderOptions = {},
 ): Promise<string> {
   return await profileAsync("output", "renderStatusline", async () => {
-    const alive = agents.filter((a) => a.status !== "Dead" && a.status !== "Unmatched");
-    const unmatched = agents.filter((a) => a.status === "Unmatched");
+    const realtimeView = buildStatuslineRealtimeView(agents, {
+      includeFocusItems: format === "tmux-badges" || format === "wezterm-pills",
+      includeIdleSnapshot: format === "tmux-badges",
+    });
+    const { snapshot, attentionItems, jumpItems, idleSnapshot } = realtimeView;
 
-    if (alive.length === 0) {
+    if (snapshot.aliveCount === 0) {
       return format === "wezterm-pills" ? renderUnavailableStatusline(format) : "AI:0";
     }
 
-    const summarySelections = buildSummaryPopupSelections(agents);
-    const waitingCount = summarySelections.itemsByTarget["phase:permission"].length;
-    const stalledCount = alive.filter((a) => a.status === "Stalled").length;
-    const activeCount = alive.filter((a) => a.status === "Active").length;
-    const highCpuCount = alive.filter((a) => a.cpuPercent >= 10).length;
-    const thinkingCount = summarySelections.itemsByTarget["phase:thinking"].length;
-    const toolCount = summarySelections.itemsByTarget["phase:tool"].length;
-    const claudeCount = summarySelections.itemsByTarget["agent:claude"].length;
-    const codexCount = summarySelections.itemsByTarget["agent:codex"].length;
-    const geminiCount = summarySelections.itemsByTarget["agent:gemini"].length;
-    const snapshot = {
-      aliveCount: alive.length,
-      waitingCount,
-      riskCount: 0,
-      stalledCount,
-      unmatchedCount: unmatched.length,
-      activeCount,
-      highCpuCount,
-      thinkingCount,
-      toolCount,
-      claudeCount,
-      codexCount,
-      geminiCount,
-    };
-
     if (format === "tmux-badges") {
       const style = options.tmuxBadgeStyle ?? "plain";
-      const jumpItems = buildJumpAttentionItems(agents);
-      const focusText = buildTmuxAttentionPills(jumpItems, attentionLimit, width, style, {
+      const focusText = buildTmuxAttentionPills(jumpItems ?? [], attentionLimit, width, style, {
         ordered: true,
       });
       const left = buildTmuxBadgeBar(snapshot, focusText, style);
-      const right = buildIdleRightRail(
-        selectIdleSessionsForRightRail(agents),
+      const right = buildTmuxIdleRightRail(
+        idleSnapshot ?? { total: 0, claudeCount: 0, codexCount: 0, entries: [] },
         width,
         width && width > 0 ? Math.max(0, width - visibleTextWidth(left) - 2) : 0,
       );
-      return joinLeftAndRightRail(
-        left,
-        right ? makeTmuxSummaryRange("idle", right) : undefined,
-        width,
-      );
+      return joinLeftAndRightRail(left, right, width);
     }
 
     if (format === "wezterm-pills") {
-      const focusText = buildAttentionFocusText(buildAttentionItems(agents), attentionLimit, width);
+      const focusText = buildAttentionFocusText(
+        jumpItems ?? attentionItems ?? [],
+        attentionLimit,
+        width,
+      );
       return serializeWeztermPills(snapshot, focusText);
     }
 

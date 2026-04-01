@@ -17,6 +17,7 @@ import {
 describe("summary popup target parsing", () => {
   it("parses supported summary targets", () => {
     assert.equal(parseSummaryPopupTarget("agent:claude"), "agent:claude");
+    assert.equal(parseSummaryPopupTarget("idle"), "idle");
     assert.equal(parseSummaryPopupTarget("phase:thinking"), "phase:thinking");
     assert.equal(parseSummaryPopupTarget("issue"), "issue");
     assert.equal(parseSummaryPopupTarget("unknown"), undefined);
@@ -24,6 +25,7 @@ describe("summary popup target parsing", () => {
 
   it("parses summary status ranges", () => {
     assert.equal(parseSummaryRange("sum:codex"), "agent:codex");
+    assert.equal(parseSummaryRange("sum:idle"), "idle");
     assert.equal(parseSummaryRange("sum:think"), "phase:thinking");
     assert.equal(parseSummaryRange("sum:issue"), "issue");
     assert.equal(parseSummaryRange("summary:agent:codex"), "agent:codex");
@@ -68,6 +70,13 @@ describe("summary popup item selection", () => {
       lastActivityAt: nowSec - 60 * 60,
     },
     {
+      pid: 22,
+      agentName: "Claude Code",
+      cwd: "/repo/claude-idle",
+      status: "Idle",
+      lastActivityAt: nowSec - 40,
+    },
+    {
       pid: 30,
       agentName: "Gemini",
       cwd: "/repo/gemini-tool",
@@ -87,7 +96,14 @@ describe("summary popup item selection", () => {
   it("selects alive sessions for agent filters and keeps stalled alive sessions", () => {
     assert.deepEqual(
       selectSummaryPopupItems(agents, "agent:claude", { nowSec }).map((agent) => agent.pid),
-      [10, 11],
+      [10, 22, 11],
+    );
+  });
+
+  it("selects reusable idle Claude/Codex sessions for idle popup filters", () => {
+    assert.deepEqual(
+      selectSummaryPopupItems(agents, "idle", { nowSec }).map((agent) => agent.pid),
+      [22],
     );
   });
 
@@ -176,6 +192,10 @@ describe("summary popup render", () => {
     assert.match(text, /^Gemini Sessions \(0\)\n\nNo matching sessions\.$/);
   });
 
+  it("renders the idle popup title", () => {
+    assert.equal(summaryPopupTitle("idle", 2), "Idle Sessions (2)");
+  });
+
   it("disambiguates duplicate repo names with parent context", () => {
     const text = renderSummaryPopup(
       [
@@ -240,11 +260,11 @@ describe("summary popup render", () => {
       10,
     );
 
-    assert.match(text, /^Codex Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /^Codex Sessions \(12\) {2}\[Page 2\/2\]/);
     assert.match(text, /\nShowing 11-12 of 12\n/);
     assert.match(text, /\n\n1\. Codex repo-11/);
     assert.match(text, /\n\n2\. Codex repo-12/);
-    assert.match(text, /\n\nControls: 1-2  Enter=1  n\/p page  q close$/);
+    assert.match(text, /\n\nControls: 1-2 {2}Enter=1 {2}n\/p page {2}q close$/);
   });
 
   it("renders issue page sections with local counts when a section is partially shown", () => {
@@ -269,10 +289,10 @@ describe("summary popup render", () => {
       10,
     );
 
-    assert.match(text, /^Issue Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /^Issue Sessions \(12\) {2}\[Page 2\/2\]/);
     assert.match(text, /\nShowing 11-12 of 12\n/);
     assert.match(text, /\n\nStalled \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
     assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
-    assert.match(text, /\n\nControls: 1-2  Enter=1  n\/p page  q close$/);
+    assert.match(text, /\n\nControls: 1-2 {2}Enter=1 {2}n\/p page {2}q close$/);
   });
 });

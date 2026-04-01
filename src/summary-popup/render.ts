@@ -67,7 +67,11 @@ function formatPageHeader(title: string, page: number, totalPages: number): stri
   return `${title}  [Page ${page}/${totalPages}]`;
 }
 
-function formatPageWindow(startIndex: number, itemCount: number, totalItems: number): string | undefined {
+function formatPageWindow(
+  startIndex: number,
+  itemCount: number,
+  totalItems: number,
+): string | undefined {
   if (totalItems === 0 || itemCount === 0) return undefined;
   const start = startIndex + 1;
   const end = startIndex + itemCount;
@@ -91,7 +95,11 @@ export function renderSummaryPopupPage(
   if (popupPage.totalItems === 0) {
     return `${title}\n\nNo matching sessions.`;
   }
-  const pageWindow = formatPageWindow(popupPage.startIndex, popupPage.items.length, popupPage.totalItems);
+  const pageWindow = formatPageWindow(
+    popupPage.startIndex,
+    popupPage.items.length,
+    popupPage.totalItems,
+  );
   const controls = formatPageControls(popupPage.items.length, popupPage.totalPages);
 
   if (target !== "issue") {

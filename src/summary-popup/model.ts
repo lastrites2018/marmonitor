@@ -2,6 +2,7 @@ import {
   type AttentionBuildOptions,
   type AttentionItem,
   buildAttentionItems,
+  isIdleRightRailCandidate,
 } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
 import type { SummaryPopupTarget } from "./shared.js";
@@ -109,6 +110,10 @@ export function buildSummaryPopupSelections(
       agents.filter((agent) => isAlive(agent) && agent.agentName === "Gemini"),
       attentionKinds,
     ),
+    idle: orderedSummaryItems(
+      agents.filter((agent) => isIdleRightRailCandidate(agent)),
+      attentionKinds,
+    ),
     "phase:permission": orderedSummaryItems(
       agents.filter((agent) => isAlive(agent) && agent.phase === "permission"),
       attentionKinds,
@@ -141,6 +146,8 @@ export function summaryPopupTitle(target: SummaryPopupTarget, count: number): st
       return `Codex Sessions (${count})`;
     case "agent:gemini":
       return `Gemini Sessions (${count})`;
+    case "idle":
+      return `Idle Sessions (${count})`;
     case "phase:permission":
       return `Approval Waiting (${count})`;
     case "phase:thinking":
@@ -196,7 +203,9 @@ export function buildSummaryPopupPage(
   options: AttentionBuildOptions & { pageSize?: number } = {},
 ): SummaryPopupPage {
   const pageSize =
-    Number.isInteger(options.pageSize) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 10;
+    Number.isInteger(options.pageSize) && Number(options.pageSize) > 0
+      ? Number(options.pageSize)
+      : 10;
   const sections = buildSummaryPopupSections(agents, target, options);
   const allItems = sections.flatMap((section) => section.items);
   const totalItems = allItems.length;

@@ -278,6 +278,18 @@ export interface IdleRightRailSnapshot {
   entries: IdleRightRailEntry[];
 }
 
+export interface StatuslineRealtimeView {
+  snapshot: StatuslineSnapshot;
+  attentionItems?: AttentionItem[];
+  jumpItems?: AttentionItem[];
+  idleSnapshot?: IdleRightRailSnapshot;
+}
+
+export interface StatuslineRealtimeViewOptions extends AttentionBuildOptions {
+  includeFocusItems?: boolean;
+  includeIdleSnapshot?: boolean;
+}
+
 export function stripTmuxFormatting(text: string): string {
   return text.replace(/#\[[^\]]*]/g, "");
 }
@@ -576,6 +588,42 @@ export function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRigh
   };
 }
 
+export function buildStatuslineRealtimeView(
+  agents: AgentSession[],
+  options: StatuslineRealtimeViewOptions = {},
+): StatuslineRealtimeView {
+  const alive = agents.filter((agent) => agent.status !== "Dead" && agent.status !== "Unmatched");
+  const snapshot: StatuslineSnapshot = {
+    aliveCount: alive.length,
+    waitingCount: alive.filter((agent) => agent.phase === "permission").length,
+    riskCount: 0,
+    stalledCount: alive.filter((agent) => agent.status === "Stalled").length,
+    unmatchedCount: agents.filter((agent) => agent.status === "Unmatched").length,
+    activeCount: alive.filter((agent) => agent.status === "Active").length,
+    highCpuCount: alive.filter((agent) => agent.cpuPercent >= 10).length,
+    claudeCount: alive.filter((agent) => agent.agentName === "Claude Code").length,
+    codexCount: alive.filter((agent) => agent.agentName === "Codex").length,
+    geminiCount: alive.filter((agent) => agent.agentName === "Gemini").length,
+  };
+
+  let attentionItems: AttentionItem[] | undefined;
+  let jumpItems: AttentionItem[] | undefined;
+  if (options.includeFocusItems) {
+    attentionItems = buildAttentionItems(agents, options);
+    jumpItems = orderedAttentionItems(attentionItems);
+    snapshot.waitingCount = attentionItems.filter((item) => item.kind === "permission").length;
+    snapshot.thinkingCount = attentionItems.filter((item) => item.kind === "thinking").length;
+    snapshot.toolCount = attentionItems.filter((item) => item.kind === "tool").length;
+  }
+
+  return {
+    snapshot,
+    attentionItems,
+    jumpItems,
+    idleSnapshot: options.includeIdleSnapshot ? selectIdleSessionsForRightRail(agents) : undefined,
+  };
+}
+
 function buildIdleRightRailCounts(snapshot: IdleRightRailSnapshot): string[] {
   const parts: string[] = [];
   if (snapshot.claudeCount > 0) parts.push(`Cl${snapshot.claudeCount}`);
@@ -583,28 +631,82 @@ function buildIdleRightRailCounts(snapshot: IdleRightRailSnapshot): string[] {
   return parts;
 }
 
-export function buildIdleRightRail(
+type IdleRightRailVariant =
+  | { kind: "full"; countLabel: string; names: IdleRightRailEntry[] }
+  | { kind: "compact"; countLabel: string }
+  | { kind: "minimal" };
+
+function resolveIdleRightRailVariant(
   snapshot: IdleRightRailSnapshot,
   width: number | undefined,
   availableWidth: number,
-): string | undefined {
+): IdleRightRailVariant | undefined {
   if (!width || width < 90 || snapshot.total === 0 || availableWidth <= 0) {
     return undefined;
   }
 
   const countParts = buildIdleRightRailCounts(snapshot);
   const countLabel = countParts.length > 0 ? countParts.join(" ") : String(snapshot.total);
-  const minimal = `idle ${snapshot.total}`;
-  const compact = `idle ${countLabel}`;
-  const nameLimit = width < 160 ? 2 : 3;
-  const names = snapshot.entries
-    .slice(0, nameLimit)
-    .map((entry) => entry.label)
-    .join(" · ");
-  const full = names ? `idle ${countLabel} | ${names}` : compact;
+  const nameLimit = snapshot.total <= 5 ? 5 : width < 160 ? 2 : 3;
+  const names = snapshot.entries.slice(0, nameLimit);
+  const fullPlain =
+    names.length > 0
+      ? `idle ${countLabel} | ${names.map((entry) => entry.label).join(" · ")}`
+      : `idle ${countLabel}`;
+  const compactPlain = `idle ${countLabel}`;
+  const minimalPlain = `idle ${snapshot.total}`;
 
-  const variants = [full, compact, minimal];
-  return variants.find((variant) => visibleTextWidth(variant) <= availableWidth);
+  if (visibleTextWidth(fullPlain) <= availableWidth) {
+    return { kind: "full", countLabel, names };
+  }
+  if (visibleTextWidth(compactPlain) <= availableWidth) {
+    return { kind: "compact", countLabel };
+  }
+  if (visibleTextWidth(minimalPlain) <= availableWidth) {
+    return { kind: "minimal" };
+  }
+  return undefined;
+}
+
+export function buildIdleRightRail(
+  snapshot: IdleRightRailSnapshot,
+  width: number | undefined,
+  availableWidth: number,
+): string | undefined {
+  const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
+  if (!variant) return undefined;
+  if (variant.kind === "minimal") {
+    return `idle ${snapshot.total}`;
+  }
+  if (variant.kind === "compact") {
+    return `idle ${variant.countLabel}`;
+  }
+  return `idle ${variant.countLabel} | ${variant.names.map((entry) => entry.label).join(" · ")}`;
+}
+
+export function makeTmuxSummaryRange(target: SummaryPopupTarget, content: string): string {
+  return tmuxUserRange(serializeSummaryRange(target), content);
+}
+
+export function buildTmuxIdleRightRail(
+  snapshot: IdleRightRailSnapshot,
+  width: number | undefined,
+  availableWidth: number,
+): string | undefined {
+  const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
+  if (!variant) return undefined;
+  if (variant.kind === "minimal") {
+    return makeTmuxSummaryRange("idle", `idle ${snapshot.total}`);
+  }
+  if (variant.kind === "compact") {
+    return makeTmuxSummaryRange("idle", `idle ${variant.countLabel}`);
+  }
+
+  const summary = makeTmuxSummaryRange("idle", `idle ${variant.countLabel}`);
+  const names = variant.names
+    .map((entry) => tmuxUserRange(`pid:${entry.pid}`, entry.label))
+    .join(" · ");
+  return names ? `${summary} | ${names}` : summary;
 }
 
 export function joinLeftAndRightRail(

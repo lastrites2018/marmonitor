@@ -4,13 +4,17 @@ idle right rail 계획
 - 2026-04-01: 1차 구현 완료
   - `tmux-badges` 포맷에 idle right rail 추가
   - 데이터 소스는 기존 `AgentSession[]`만 재사용
-  - Claude/Codex의 진짜 `Idle` 세션만 포함
+  - Claude/Codex의 `warm-idle` 세션만 포함
   - 폭이 부족하면 `full -> compact -> minimal -> hidden` 순서로 후퇴
   - left content는 절대 줄이지 않고, right rail만 생략
   - 회귀 테스트 추가
+- 2026-04-01: 상호작용 추가
+  - idle summary는 popup target으로 연결
+  - full variant에서 개별 idle 이름은 해당 세션으로 직접 jump 가능
+  - compact/minimal variant는 summary popup만 유지
 
 목적
-- 하단 statusline의 기존 왼쪽 정보와 별개로, 오른쪽 정렬 영역에 "현재 켜져 있지만 아무 작업도 진행 중이지 않은 Claude/Codex 세션"을 모아서 보여준다.
+- 하단 statusline의 기존 왼쪽 정보와 별개로, 오른쪽 정렬 영역에 "현재 켜져 있지만 지금 다시 투입 가능한 Claude/Codex 세션"을 모아서 보여준다.
 - 이 정보는 "지금 중요한 세션"이 아니라 "지금 다시 투입 가능한 세션"을 빠르게 파악하기 위한 운영 정보다.
 - 기존 attention / thinking / tool / permission 기능은 유지하고, 별도의 정보 축으로 추가한다.
 
@@ -93,15 +97,23 @@ idle right rail 계획
   - `idle 5`
 
 인터랙션
-- 1차는 read-only
-- 오른쪽 idle 영역은 클릭 기능 없이 시작하는 것이 맞다.
-- 이유:
-  - 현재 핵심 가치는 "가용 슬롯 파악"이지 "상호작용 추가"가 아니다.
-  - clickable surface를 늘리면 사용자가 상태줄 semantics를 더 배워야 한다.
+- 현재 구현은 `summary inspect + item jump` 방식이다.
+- summary 영역
+  - `idle Cl2 Cx3`
+  - `idle 5`
+  - 클릭 시 idle popup을 연다.
+- full variant의 개별 이름
+  - `marmonitor`
+  - `roam-new`
+  - 클릭 시 해당 세션으로 직접 jump 한다.
+- compact/minimal variant
+  - summary popup만 제공한다.
+
+이유
+- idle rail의 본질은 "가용 슬롯 파악"이지만, 이름이 실제로 보이는 full variant에서는 직접 점프도 자연스럽다.
+- 반대로 compact/minimal에서는 이름이 없거나 너무 압축되어 있으므로, summary popup만 유지하는 것이 의미가 명확하다.
 
 비목표
-- idle 영역에서 바로 jump
-- idle 영역 popup
 - idle 영역에서 세션 kill/reuse action 제공
 - 첫 단계에서 Gemini 포함
 
@@ -119,9 +131,23 @@ idle right rail 계획
 
 핵심 원칙
 - "진짜 대기 중"인 세션만 포함해야 한다.
+- 더 정확히는 `warm-idle`만 right rail에 포함해야 한다.
 - 단순히 CPU가 낮다고 idle로 보면 안 된다.
 
-1차 포함 조건
+구간 정의
+- `recent-complete`
+  - 현재 `Idle`
+  - 직전 의미 있는 상태가 `thinking` 또는 `tool`
+  - 최근 완료 시각이 `<= 5분`
+- `warm-idle`
+  - 현재 `Idle`
+  - `recent-complete`에는 해당하지 않음
+  - idle 또는 최근 activity 경과 시간이 `> 5분 && < 1시간`
+- `cold-idle`
+  - 현재 `Idle`
+  - idle 또는 최근 activity 경과 시간이 `>= 1시간`
+
+right rail 포함 조건
 - `agentName`이 `Claude Code` 또는 `Codex`
 - `status === "Idle"`
 - `phase !== "permission"`
@@ -130,8 +156,15 @@ idle right rail 계획
 - `status !== "Stalled"`
 - `status !== "Unmatched"`
 - `status !== "Dead"`
+- `warm-idle` 구간에 해당
 
-1차 제외 조건
+right rail 제외 조건
+- `recent-complete`
+  - 왼쪽 attention detail 후보
+- `cold-idle`
+  - popup / inventory로만 남기고 right rail에서는 제외
+
+기본 제외 조건
 - permission 대기
 - thinking
 - tool
@@ -143,15 +176,17 @@ idle right rail 계획
 왜 이렇게 정의하나
 - permission/thinking/tool은 사실상 진행 중이다.
 - stalled/unmatched/dead는 "다시 쓸 수 있는 대기 슬롯"이 아니다.
+- `recent-complete`는 오른쪽 rail보다 왼쪽 attention에 남는 것이 더 맞다.
+- `cold-idle`은 statusline보다 popup/inventory에 남는 것이 더 맞다.
 - Gemini는 현재 운영 대상에서 제외해 정보 밀도를 줄인다.
 
 정렬 기준
-- 가장 최근 활동이 있었던 idle 세션 먼저
+- 가장 최근에 `warm-idle`로 들어온 세션 먼저
 - tie-breaker는 agent name, 그다음 pid
 
 추천 정렬 함수
-1. `lastActivityAt` desc
-2. `lastResponseAt` desc
+1. idle 전환 또는 최근 활동 시각 desc
+2. `lastActivityAt` desc
 3. `startedAt` desc
 4. `agentName` asc
 5. `pid` asc
@@ -194,13 +229,14 @@ function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRightRailSn
 ```
 
 추후 확장 후보
-- "idle but recently active"와 "long-idle" 구분
-- 일정 시간 이상 놀고 있는 세션을 뒤로 밀기
+- `recent-complete` / `warm-idle` / `cold-idle` 판정 기준을 config화
+- cold-idle popup 또는 inventory 추가
 - Gemini optional inclusion
 
 수용 기준
-- 오른쪽 idle 목록에는 사용자가 "지금 쓸 수 있다"고 받아들일 만한 세션만 들어간다.
+- 오른쪽 idle 목록에는 사용자가 "지금 쓸 수 있다"고 받아들일 만한 `warm-idle` 세션만 들어간다.
 - thinking/tool 세션이 실수로 idle 영역에 섞이지 않는다.
+- 1시간 이상 방치된 세션은 right rail에서 빠진다.
 
 3. 렌더 규칙
 
@@ -267,7 +303,8 @@ fallback 포맷
   - `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
 
 이름 선택 규칙
-- 최대 3개
+- idle 총합이 5개 이하이면, 폭이 허용하는 한 전부 표시
+- idle 총합이 6개 이상이면 최대 3개만 표시
 - 정렬 기준 상위 세션부터 선택
 - 표시명은 repo/folder명
 - 중복 이름이 서로 다른 cwd면 부모 경로 포함
@@ -432,8 +469,6 @@ benchmark 확인 항목
 7. 필요하면 label/threshold 미세 조정
 
 비범위 명시
-- idle rail 클릭
-- idle rail popup
 - idle 세션 재사용/전환 action
 - right rail 전용 color/pill style
 - idle rail을 별도 collector artifact로 저장

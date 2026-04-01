@@ -67,7 +67,10 @@ describe("renderStatusline idle right rail", () => {
     const text = await renderStatusline(agents, "tmux-badges", 5, 180, {
       tmuxBadgeStyle: "plain",
     });
-    assert.match(text, /#\[range=user\|sum:idle]idle Cl1 Cx1 \| marmonitor · roam-new#\[norange]$/);
+    assert.match(
+      text,
+      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor#\[norange] · #\[range=user\|pid:11]roam-new#\[norange]$/,
+    );
   });
 
   it("hides the idle right rail on narrow tmux-badges widths", async () => {

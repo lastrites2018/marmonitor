@@ -17,10 +17,10 @@ import {
   collectorRunLockFile,
   collectorSnapshotFile,
   collectorStatuslineFile,
-  refreshCollectorRunLock,
   readCollectorHealth,
   readCollectorSnapshot,
   readCollectorStatusline,
+  refreshCollectorRunLock,
   releaseCollectorRunLock,
   writeCollectorHealth,
   writeCollectorSnapshot,
@@ -318,7 +318,11 @@ describe("collector store", () => {
     const now = Date.now();
     await writeCollectorStatusline("tmux-badges", 5, 214, "AI:7", root);
     const slightlyStaleSec = (now - 5_000) / 1000;
-    await utimes(collectorStatuslineFile("tmux-badges", 5, 214, root), slightlyStaleSec, slightlyStaleSec);
+    await utimes(
+      collectorStatuslineFile("tmux-badges", 5, 214, root),
+      slightlyStaleSec,
+      slightlyStaleSec,
+    );
     await writeCollectorHealth(
       {
         pid: 1005,
