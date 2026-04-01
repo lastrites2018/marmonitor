@@ -13,6 +13,10 @@ export interface SummaryPopupSelections {
   itemsByTarget: Record<SummaryPopupTarget, AgentSession[]>;
 }
 
+export interface SummaryPopupDerivation extends SummaryPopupSelections {
+  issueSections: SummaryPopupSection[];
+}
+
 export interface SummaryPopupSection {
   key: "all" | "stalled" | "unmatched";
   title: string;
@@ -73,28 +77,38 @@ function orderedSummaryItems(
   });
 }
 
-export function selectSummaryPopupItems(
+function buildIssueSections(
   agents: AgentSession[],
-  target: SummaryPopupTarget,
+  attentionKinds: Map<number, AttentionItem["kind"]>,
   options: AttentionBuildOptions = {},
-): AgentSession[] {
-  return buildSummaryPopupSelections(agents, options).itemsByTarget[target];
+): SummaryPopupSection[] {
+  const stalled = orderedSummaryItems(
+    agents.filter((agent) => agent.status === "Stalled"),
+    attentionKinds,
+  );
+  const unmatched = orderedSummaryItems(
+    agents.filter((agent) => isPersistentUnmatched(agent, { nowSec: options.nowSec })),
+    attentionKinds,
+  );
+
+  return [
+    {
+      key: "stalled" as const,
+      title: `Inactive for a While (${stalled.length})`,
+      items: stalled,
+    },
+    {
+      key: "unmatched" as const,
+      title: `Unresolved AI Processes (${unmatched.length})`,
+      items: unmatched,
+    },
+  ].filter((section) => section.items.length > 0);
 }
 
-export function selectSummaryPopupItem(
-  agents: AgentSession[],
-  target: SummaryPopupTarget,
-  selection: number,
-  options: AttentionBuildOptions = {},
-): AgentSession | undefined {
-  if (!Number.isInteger(selection) || selection < 1) return undefined;
-  return selectSummaryPopupItems(agents, target, options)[selection - 1];
-}
-
-export function buildSummaryPopupSelections(
+export function buildSummaryPopupDerivation(
   agents: AgentSession[],
   options: AttentionBuildOptions = {},
-): SummaryPopupSelections {
+): SummaryPopupDerivation {
   const attentionKinds = new Map(
     buildAttentionItems(agents, options).map((item) => [item.pid, item.kind] as const),
   );
@@ -139,7 +153,34 @@ export function buildSummaryPopupSelections(
   return {
     attentionKinds,
     itemsByTarget,
+    issueSections: buildIssueSections(agents, attentionKinds, options),
   };
+}
+
+export function selectSummaryPopupItems(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  options: AttentionBuildOptions = {},
+): AgentSession[] {
+  return buildSummaryPopupDerivation(agents, options).itemsByTarget[target];
+}
+
+export function selectSummaryPopupItem(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  selection: number,
+  options: AttentionBuildOptions = {},
+): AgentSession | undefined {
+  if (!Number.isInteger(selection) || selection < 1) return undefined;
+  return selectSummaryPopupItems(agents, target, options)[selection - 1];
+}
+
+export function buildSummaryPopupSelections(
+  agents: AgentSession[],
+  options: AttentionBuildOptions = {},
+): SummaryPopupSelections {
+  const { attentionKinds, itemsByTarget } = buildSummaryPopupDerivation(agents, options);
+  return { attentionKinds, itemsByTarget };
 }
 
 export function summaryPopupTitle(target: SummaryPopupTarget, count: number): string {
@@ -168,38 +209,17 @@ export function buildSummaryPopupSections(
   target: SummaryPopupTarget,
   options: AttentionBuildOptions = {},
 ): SummaryPopupSection[] {
-  const selections = buildSummaryPopupSelections(agents, options);
+  const derivation = buildSummaryPopupDerivation(agents, options);
   if (target !== "issue") {
     return [
       {
         key: "all",
-        title: summaryPopupTitle(target, selections.itemsByTarget[target].length),
-        items: selections.itemsByTarget[target],
+        title: summaryPopupTitle(target, derivation.itemsByTarget[target].length),
+        items: derivation.itemsByTarget[target],
       },
     ];
   }
-
-  const stalled = orderedSummaryItems(
-    agents.filter((agent) => agent.status === "Stalled"),
-    selections.attentionKinds,
-  );
-  const unmatched = orderedSummaryItems(
-    agents.filter((agent) => isPersistentUnmatched(agent, { nowSec: options.nowSec })),
-    selections.attentionKinds,
-  );
-
-  return [
-    {
-      key: "stalled" as const,
-      title: `Inactive for a While (${stalled.length})`,
-      items: stalled,
-    },
-    {
-      key: "unmatched" as const,
-      title: `Unresolved AI Processes (${unmatched.length})`,
-      items: unmatched,
-    },
-  ].filter((section) => section.items.length > 0);
+  return derivation.issueSections;
 }
 
 export function buildSummaryPopupPage(
@@ -212,7 +232,17 @@ export function buildSummaryPopupPage(
     Number.isInteger(options.pageSize) && Number(options.pageSize) > 0
       ? Number(options.pageSize)
       : 10;
-  const sections = buildSummaryPopupSections(agents, target, options);
+  const derivation = buildSummaryPopupDerivation(agents, options);
+  const sections =
+    target === "issue"
+      ? derivation.issueSections
+      : [
+          {
+            key: "all" as const,
+            title: summaryPopupTitle(target, derivation.itemsByTarget[target].length),
+            items: derivation.itemsByTarget[target],
+          },
+        ];
   const allItems = sections.flatMap((section) => section.items);
   const totalItems = allItems.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));

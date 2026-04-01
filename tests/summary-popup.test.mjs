@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildSummaryPopupDerivation,
   buildSummaryPopupPage,
   buildSummaryPopupSections,
   selectSummaryPopupItem,
@@ -144,6 +145,24 @@ describe("summary popup item selection", () => {
     const sections = buildSummaryPopupSections(agents, "issue", { nowSec });
     assert.deepEqual(
       sections.map((section) => [section.key, section.items.map((agent) => agent.pid)]),
+      [
+        ["stalled", [11]],
+        ["unmatched", [40]],
+      ],
+    );
+  });
+
+  it("builds one shared derivation for popup targets and issue sections", () => {
+    const derivation = buildSummaryPopupDerivation(agents, { nowSec });
+    assert.deepEqual(
+      derivation.itemsByTarget.issue.map((agent) => agent.pid),
+      [11, 40],
+    );
+    assert.deepEqual(
+      derivation.issueSections.map((section) => [
+        section.key,
+        section.items.map((agent) => agent.pid),
+      ]),
       [
         ["stalled", [11]],
         ["unmatched", [40]],

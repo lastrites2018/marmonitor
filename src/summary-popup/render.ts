@@ -1,11 +1,6 @@
 import { buildStatuslinePathLabels, formatElapsedCompact, shortenPath } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
-import {
-  buildSummaryPopupPage,
-  buildSummaryPopupSections,
-  buildSummaryPopupSelections,
-  summaryPopupTitle,
-} from "./model.js";
+import { buildSummaryPopupDerivation, buildSummaryPopupPage, summaryPopupTitle } from "./model.js";
 import type { SummaryPopupTarget } from "./shared.js";
 
 function popupPhaseIcon(agent: AgentSession): string | undefined {
@@ -42,7 +37,8 @@ function popupEmptyState(target: SummaryPopupTarget): string {
 }
 
 export function renderSummaryPopup(agents: AgentSession[], target: SummaryPopupTarget): string {
-  const items = buildSummaryPopupSelections(agents).itemsByTarget[target];
+  const derivation = buildSummaryPopupDerivation(agents);
+  const items = derivation.itemsByTarget[target];
   const title = summaryPopupTitle(target, items.length);
   if (items.length === 0) {
     return `${title}\n\n${popupEmptyState(target)}`;
@@ -53,7 +49,7 @@ export function renderSummaryPopup(agents: AgentSession[], target: SummaryPopupT
     return `${title}\n\n${items.map((agent, index) => popupLine(index + 1, agent, labels[index])).join("\n\n")}`;
   }
 
-  const sections = buildSummaryPopupSections(agents, target);
+  const sections = derivation.issueSections;
   let currentIndex = 1;
   const renderedSections = sections.map((section) => {
     const labels = buildStatuslinePathLabels(section.items, 32);
