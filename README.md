@@ -19,6 +19,10 @@
 
 ---
 
+> **Fork note**
+>
+> This repository is a personal fork and customization of the original `marmonitor` work by MJ JO. The core ideas of tmux-native AI session monitoring, attention-first statusline design, and zero-instrumentation process/session enrichment come from the original project and its author. This fork mainly layers personal workflow changes on top of that foundation. In other words, this is a personal variant, not the canonical upstream.
+
 ## Why marmonitor?
 
 Running multiple AI coding agents in tmux is now the norm — Claude Code refactoring your backend, Codex writing tests in another pane, Gemini reviewing docs in a third. But as sessions multiply, you hit the same wall:
@@ -41,15 +45,18 @@ Running multiple AI coding agents in tmux is now the norm — Claude Code refact
 
 **tmux statusline** — always visible at the bottom of your terminal:
 - Agent counts (`Cl 12`, `Cx 2`, `Gm 1`) — how many sessions are running
-- Phase alerts (`⏳ 1`, `🤔 2`, `🔧 1`) — which sessions need attention
-- Numbered pills (`1 ⏳Cl my-project allow`, `2 •Cx api-server 6m`) — jump to any session with `Option+1~5`
+- Summary badges (`⏳ 1`, `⚠ 2`, `🤔 2`, `🔧 1`) — click a badge to open a filtered popup
+- Numbered attention items (`1 ⏳Cl my-project allow`, `2 🤔Cx api-server 6m`) — click to jump directly to that tmux pane
+- Right-aligned idle rail (`idle Cl2 Cx3 | marmonitor · roam-new`) — shows Claude/Codex sessions that are open but currently reusable
 
 **Attention priority** — sessions that need your input come first:
 - ⏳ `permission` (allow waiting) is always #1 — you need to approve
-- 🤔 `thinking` (AI responding) is #2 — result coming soon
-- Then most recently active sessions, so you can quickly return to what you were working on
+- 🤔 / 🔧 recent `thinking` and `tool` sessions stay near the front
+- Recently completed sessions stay visible for a short window, while long-idle sessions are pushed out of the left rail
 
-**Quick jump** — press `Option+1` to jump directly to the #1 attention session's tmux pane. No searching through windows.
+**Quick jump** — click a numbered attention item or press `Option+1` to jump directly to the top attention session's tmux pane. No searching through windows.
+
+**Low-latency statusline path** — this fork uses a thin statusline client and collector-backed artifacts so the foreground tmux refresh path stays lightweight during multi-session use.
 
 **Full status** — `marmonitor status` shows everything:
 
@@ -62,6 +69,18 @@ Running multiple AI coding agents in tmux is now the norm — Claude Code refact
 **Zero instrumentation** — no API keys, no agent plugins, no code changes. marmonitor reads local process info and session files from the outside. Two commands to get started: `npm install -g marmonitor` then `marmonitor setup tmux`.
 
 > **Built for the tmux + AI multi-session workflow.** If you run 5+ AI coding sessions daily across different projects, marmonitor turns context-switching from guesswork into a glance at your status bar.
+
+## What Is Different In This Fork?
+
+This fork keeps the original marmonitor direction, but the current implementation is more opinionated around one personal workflow:
+
+- Collector-backed statusline serving for lower-latency tmux refreshes
+- Clickable summary badges that open filtered tmux popups
+- Clickable numbered detail items that jump directly to panes
+- Right-aligned idle rail for reusable Claude/Codex sessions
+- Statusline projection that separates recent-complete sessions from warm-idle inventory
+
+If you are looking for the canonical project direction, treat upstream as the reference. If you are looking for one person's tuned tmux workflow, this fork documents that behavior.
 
 ## Supported Agents
 
@@ -132,12 +151,16 @@ Once installed, your tmux status bar automatically shows AI session badges. You 
 | `prefix + m` | Dock — compact monitor pane |
 | `Option+1~5` | Direct jump to attention session #1~5 |
 
+In this fork's current tmux flow, summary badges and numbered detail items are also clickable with the mouse.
+
 CLI commands:
 
 ```bash
 marmonitor status       # Full session inventory
 marmonitor attention    # What needs your input?
 marmonitor watch        # Live full-screen monitor
+marmonitor collector start   # Start the background collector
+marmonitor collector status  # Inspect collector health
 marmonitor help         # All commands and options
 ```
 
@@ -167,6 +190,13 @@ The [marmonitor-tmux](https://github.com/mjjo16/marmonitor-tmux) plugin handles 
 - 2nd status line with agent badges and attention pills
 - Key bindings for popup, jump, and dock
 - Option+1~5 direct jump
+
+This fork's current statusline behavior additionally assumes:
+
+- collector-backed statusline serving
+- clickable summary badges
+- clickable detail items
+- right-aligned idle rail for warm idle Claude/Codex sessions
 
 All settings are customizable via `@marmonitor-*` options. See the [plugin README](https://github.com/mjjo16/marmonitor-tmux) for details.
 

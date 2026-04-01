@@ -19,6 +19,10 @@
 
 ---
 
+> **포크 안내**
+>
+> 이 저장소는 MJ JO가 만든 원본 `marmonitor`를 바탕으로 개인적으로 수정해 쓰는 포크입니다. tmux 기반 AI 세션 모니터링, attention 중심 상태줄, 외부 계측 없이 프로세스와 세션 파일을 읽어 상태를 복원하는 핵심 아이디어는 원저작자와 원본 프로젝트의 기여에서 출발했습니다. 이 포크는 그 위에 개인 워크플로에 맞춘 변경을 덧댄 버전일 뿐이며, 정식 기준 구현은 아닙니다.
+
 ## 왜 marmonitor인가?
 
 tmux에서 여러 AI 코딩 에이전트를 동시에 실행하는 것은 이제 일상이 되었습니다 — Claude Code가 백엔드를 리팩토링하고, Codex가 다른 패널에서 테스트를 작성하고, Gemini가 문서를 검토합니다. 하지만 세션이 늘어날수록 같은 문제에 부딪힙니다:
@@ -41,15 +45,18 @@ tmux에서 여러 AI 코딩 에이전트를 동시에 실행하는 것은 이제
 
 **tmux 상태바** — 터미널 하단에 항상 표시:
 - 에이전트 수 (`Cl 12`, `Cx 2`, `Gm 1`) — 실행 중인 세션 수
-- 단계 알림 (`⏳ 1`, `🤔 2`, `🔧 1`) — 주의가 필요한 세션
-- 번호 필 (`1 ⏳Cl my-project allow`, `2 •Cx api-server 6m`) — `Option+1~5`로 세션 바로 이동
+- 요약 뱃지 (`⏳ 1`, `⚠ 2`, `🤔 2`, `🔧 1`) — 클릭하면 해당 범주의 세션만 모은 팝업 열기
+- 번호가 붙은 어텐션 항목 (`1 ⏳Cl my-project allow`, `2 🤔Cx api-server 6m`) — 클릭하면 해당 tmux 패널로 바로 이동
+- 오른쪽 idle rail (`idle Cl2 Cx3 | marmonitor · roam-new`) — 현재 켜져 있지만 다시 투입 가능한 Claude/Codex 세션 표시
 
 **어텐션 우선순위** — 입력이 필요한 세션이 먼저 표시:
 - ⏳ `permission` (승인 대기)이 항상 #1 — 승인이 필요합니다
-- 🤔 `thinking` (AI 응답 중)이 #2 — 곧 결과가 나옵니다
-- 이후 최근 활성 세션 순으로 정렬
+- 🤔 / 🔧 최근 `thinking`, `tool` 세션이 그 뒤를 잇습니다
+- 방금 끝난 세션은 짧은 시간 동안만 왼쪽에 남고, 오래 idle인 세션은 오른쪽 rail이나 popup 쪽으로 밀립니다
 
-**빠른 이동** — `Option+1`을 누르면 #1 어텐션 세션의 tmux 패널로 바로 이동합니다. 윈도우를 뒤질 필요가 없습니다.
+**빠른 이동** — 번호가 붙은 어텐션 항목을 클릭하거나 `Option+1`을 눌러 #1 어텐션 세션으로 바로 이동합니다. 윈도우를 뒤질 필요가 없습니다.
+
+**낮은 지연의 상태줄 경로** — 이 포크는 얇은 statusline client와 collector 기반 artifact를 사용해, 멀티세션 환경에서도 tmux foreground refresh 경로를 가볍게 유지합니다.
 
 **전체 상태 확인** — `marmonitor status`로 모든 정보 확인:
 
@@ -62,6 +69,18 @@ tmux에서 여러 AI 코딩 에이전트를 동시에 실행하는 것은 이제
 **계측 불필요** — API 키, 에이전트 플러그인, 코드 변경 없이 사용 가능합니다. marmonitor는 외부에서 로컬 프로세스 정보와 세션 파일을 읽습니다. 시작하려면 두 개의 명령어만 실행하세요: `npm install -g marmonitor` 그리고 `marmonitor setup tmux`.
 
 > **tmux + AI 멀티세션 워크플로우를 위해 만들었습니다.** 매일 5개 이상의 AI 코딩 세션을 다양한 프로젝트에서 실행한다면, marmonitor는 컨텍스트 전환을 추측에서 상태바 한 번 확인으로 바꿔줍니다.
+
+## 이 포크에서 달라진 점
+
+이 포크는 원본 marmonitor의 방향을 유지하되, 개인 워크플로에 맞춰 몇 가지를 더 강하게 밀어 붙였습니다.
+
+- collector 기반 statusline 서빙으로 tmux 갱신 지연 완화
+- summary badge 클릭 시 필터된 popup 열기
+- 번호가 붙은 detail item 클릭 시 바로 점프
+- 다시 투입 가능한 Claude/Codex 세션을 보여주는 오른쪽 idle rail
+- recent-complete와 warm-idle을 구분하는 statusline projection
+
+즉, 원본 프로젝트의 정식 방향을 설명하는 문서라기보다, 한 사람이 실제로 쓰기 좋게 다듬은 개인 수정본의 동작을 설명하는 README로 보는 편이 맞습니다.
 
 ## 지원 에이전트
 
@@ -132,12 +151,16 @@ npm link
 | `prefix + m` | 독 — 컴팩트 모니터 패널 |
 | `Option+1~5` | 어텐션 세션 #1~5로 바로 이동 |
 
+이 포크의 현재 tmux 흐름에서는 summary badge와 번호가 붙은 detail item도 마우스로 클릭할 수 있습니다.
+
 CLI 명령어:
 
 ```bash
 marmonitor status       # 전체 세션 목록
 marmonitor attention    # 입력이 필요한 세션 확인
 marmonitor watch        # 실시간 전체 화면 모니터
+marmonitor collector start   # 백그라운드 collector 시작
+marmonitor collector status  # collector 상태 확인
 marmonitor help         # 모든 명령어 및 옵션
 ```
 
@@ -167,6 +190,13 @@ marmonitor help         # 모든 명령어 및 옵션
 - 에이전트 뱃지와 어텐션 필이 포함된 2번째 상태 라인
 - 팝업, 점프, 독 키 바인딩
 - Option+1~5 다이렉트 점프
+
+이 포크의 현재 상태줄 동작은 여기에 더해 다음 가정을 포함합니다.
+
+- collector 기반 statusline 서빙
+- clickable summary badge
+- clickable detail item
+- warm idle Claude/Codex 세션을 보여주는 오른쪽 idle rail
 
 모든 설정은 `@marmonitor-*` 옵션을 통해 커스터마이징 가능합니다. 자세한 내용은 [플러그인 README](https://github.com/mjjo16/marmonitor-tmux)를 참조하세요.
 
