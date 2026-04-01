@@ -477,6 +477,107 @@ describe("shared Claude caches", () => {
 
     assert.deepEqual(second, first);
   });
+
+  it("treats assistant text followed by turn_duration as done even when stop_reason is null", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "marmonitor-claude-turn-done-cache-"));
+    const projectRoot = await mkdtemp(join(tmpdir(), "marmonitor-claude-turn-done-"));
+    const cwd = "/tmp/claude-turn-done";
+    const sessionId = "claude-turn-done";
+    const startedAt = 1_717_171_717;
+    const projectDirName = cwd.replace(/[/.]/g, "-");
+    const sessionDir = join(projectRoot, projectDirName);
+    const sessionFile = join(sessionDir, `${sessionId}.jsonl`);
+    const runtimePaths = {
+      claudeProjects: [projectRoot],
+      claudeSessions: [],
+      codexSessions: [],
+      extraRoots: [],
+    };
+
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-03-31T10:00:00.000Z",
+          message: {
+            stop_reason: null,
+            content: [{ type: "text", text: "done without end_turn" }],
+          },
+        }),
+        JSON.stringify({
+          type: "system",
+          subtype: "turn_duration",
+          timestamp: "2026-03-31T10:00:00.250Z",
+        }),
+      ].join("\n")}\n`,
+      "utf8",
+    );
+
+    claudeSessionRegistry.clear();
+    claudeProjectDirCache.clear();
+    claudePhaseCache.clear();
+
+    const result = await detectClaudePhase(sessionId, cwd, startedAt, undefined, runtimePaths, {
+      cacheRoot,
+      nowMs: 1_000,
+    });
+
+    assert.deepEqual(result, {
+      phase: "done",
+      lastResponseAt: new Date("2026-03-31T10:00:00.000Z").getTime() / 1000,
+      lastActivityAt: new Date("2026-03-31T10:00:00.250Z").getTime() / 1000,
+    });
+  });
+
+  it("keeps assistant text without turn_duration as thinking", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "marmonitor-claude-turn-thinking-cache-"));
+    const projectRoot = await mkdtemp(join(tmpdir(), "marmonitor-claude-turn-thinking-"));
+    const cwd = "/tmp/claude-turn-thinking";
+    const sessionId = "claude-turn-thinking";
+    const startedAt = 1_717_171_717;
+    const projectDirName = cwd.replace(/[/.]/g, "-");
+    const sessionDir = join(projectRoot, projectDirName);
+    const sessionFile = join(sessionDir, `${sessionId}.jsonl`);
+    const runtimePaths = {
+      claudeProjects: [projectRoot],
+      claudeSessions: [],
+      codexSessions: [],
+      extraRoots: [],
+    };
+
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-03-31T10:00:00.000Z",
+          message: {
+            stop_reason: null,
+            content: [{ type: "text", text: "still streaming" }],
+          },
+        }),
+      ].join("\n")}\n`,
+      "utf8",
+    );
+
+    claudeSessionRegistry.clear();
+    claudeProjectDirCache.clear();
+    claudePhaseCache.clear();
+
+    const result = await detectClaudePhase(sessionId, cwd, startedAt, undefined, runtimePaths, {
+      cacheRoot,
+      nowMs: 1_000,
+    });
+
+    assert.deepEqual(result, {
+      phase: "thinking",
+      lastResponseAt: new Date("2026-03-31T10:00:00.000Z").getTime() / 1000,
+      lastActivityAt: new Date("2026-03-31T10:00:00.000Z").getTime() / 1000,
+    });
+  });
 });
 
 describe("shared Codex phase cache", () => {

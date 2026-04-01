@@ -508,6 +508,15 @@ export async function detectClaudePhase(
           })
           .filter((value): value is string => Boolean(value));
       };
+      const hasLaterTurnDuration = (startIndex: number): boolean =>
+        lines.slice(startIndex + 1).some((line) => {
+          try {
+            const entry = JSON.parse(line);
+            return entry.type === "system" && entry.subtype === "turn_duration";
+          } catch {
+            return false;
+          }
+        });
 
       // Walk backwards through the last events
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
@@ -552,6 +561,11 @@ export async function detectClaudePhase(
               }
 
               if (stopReason === null || stopReason === undefined) {
+                if (contentTypes.includes("text") && hasLaterTurnDuration(i)) {
+                  phase = "done";
+                  continue;
+                }
+
                 if (contentTypes.includes("text") || contentTypes.includes("tool_use")) {
                   phase = "thinking";
                 }
