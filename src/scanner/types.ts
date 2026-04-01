@@ -10,4 +10,5 @@ export interface ScanOptions {
   includeStdoutHeuristic?: boolean;
   useSharedRuntimeSnapshots?: boolean;
   seedSessions?: AgentSession[];
+  seedTransitionSessions?: AgentSession[];
 }

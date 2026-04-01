@@ -71,6 +71,7 @@ export async function scanAgents(
   const includeStdoutHeuristic = options.includeStdoutHeuristic ?? isFullEnrichment;
   const useSharedRuntimeSnapshots = options.useSharedRuntimeSnapshots ?? false;
   const seededSessions = buildSeedSessionIndex(options.seedSessions);
+  const seededTransitionSessions = buildSeedSessionIndex(options.seedTransitionSessions);
   const seenPids = new Set<number>();
 
   // 1. Find running processes
@@ -149,6 +150,7 @@ export async function scanAgents(
     const cacheKey = `${agentName}:${proc.pid}`;
     const cachedEnrichment = sessionEnrichmentCache.get(cacheKey);
     const seededSession = seededSessions?.get(cacheKey);
+    const seededTransitionSession = seededTransitionSessions?.get(cacheKey) ?? seededSession;
 
     if (!isFullEnrichment && cachedEnrichment) {
       if (cachedEnrichment.cwd) cwd = cachedEnrichment.cwd;
@@ -306,7 +308,7 @@ export async function scanAgents(
         lastResponseAt,
         startedAt,
       },
-      seededSession,
+      seededTransitionSession,
     );
     idleSince = transitionState.idleSince;
     recentCompleteAt = transitionState.recentCompleteAt;

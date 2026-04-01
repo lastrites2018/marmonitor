@@ -34,6 +34,23 @@ export const DEFAULT_COLLECTOR_FORMATS: StatuslineFormat[] = [
   "extended",
   "tmux-badges",
 ];
+export const TRANSITION_SEED_MAX_AGE_MS = 60 * 60 * 1000;
+
+export function selectTransitionSeedSessions(
+  freshSnapshot: { value: Awaited<ReturnType<typeof scanAgents>> } | undefined,
+  staleSnapshot:
+    | {
+        value: Awaited<ReturnType<typeof scanAgents>>;
+        ageMs: number;
+      }
+    | undefined,
+  maxAgeMs = TRANSITION_SEED_MAX_AGE_MS,
+): Awaited<ReturnType<typeof scanAgents>> | undefined {
+  if (freshSnapshot?.value?.length) return freshSnapshot.value;
+  if (!staleSnapshot?.value?.length) return undefined;
+  if (staleSnapshot.ageMs > maxAgeMs) return undefined;
+  return staleSnapshot.value;
+}
 
 async function writeRenderedStatuslines(
   snapshot: Awaited<ReturnType<typeof scanAgents>>,
@@ -57,11 +74,18 @@ async function refreshCollectorArtifacts(
   startedAt: number,
 ): Promise<number> {
   const previousSnapshot = await readCollectorSnapshot(runtime.config.performance.snapshotTtlMs);
+  const transitionSeedSnapshot = selectTransitionSeedSessions(
+    previousSnapshot,
+    previousSnapshot?.fresh
+      ? previousSnapshot
+      : await readCollectorSnapshot(Number.MAX_SAFE_INTEGER),
+  );
   const snapshot = await scanAgents(runtime.config, {
     enrichmentMode: "light",
     includeStdoutHeuristic: true,
     useSharedRuntimeSnapshots: true,
     seedSessions: previousSnapshot?.value,
+    seedTransitionSessions: transitionSeedSnapshot,
   });
 
   await writeCollectorSnapshot(snapshot);
