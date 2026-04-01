@@ -113,7 +113,7 @@ export function buildSummaryEmptyMessage(target: SummaryPopupTarget): string {
     case "phase:tool":
       return "No tool sessions.";
     case "issue":
-      return "No issue sessions.";
+      return "Nothing to review right now.";
   }
 }
 

@@ -10,18 +10,18 @@ statusline UX 이후 로드맵
 - 2. summary popup interactive chooser: 완료
 - 3. idle right rail MVP: 완료
 - 4. `⚠` 의미 복원: 부분 완료
-  - `Stalled / Unmatched` 섹션 분리 완료
-  - 현재 구현에는 `Risk` placeholder가 남아 있음
-  - 이후 문서 기준은 `⚠ = stalled + persistent unmatched`, `transient unmatched` 제외, `Risk` UI 비노출
+  - issue popup은 현재 `Inactive for a While / Unresolved AI Processes` 두 섹션으로 렌더링됨
+  - `⚠ = stalled + persistent unmatched`, `transient unmatched` 제외가 반영됨
+  - `Risk`는 현재 UI에 노출되지 않음
 - 5. attention UX 정제: 부분 완료
   - stale thinking/tool 강등 완료
   - active `•` 표식 제거 완료
-  - `recent-complete / warm-idle / cold-idle` projection 정제는 미완
-  - 현재 구현은 일부를 recent activity 기반으로 근사하고 있으며, 전이 기준 모델은 아직 미도입
+  - `recent-complete / warm-idle / cold-idle` projection 도입 완료
+  - `idleSince`, `recentCompleteAt` 기반 전이 필드는 이미 공용 상태에 반영됨
 - 6. collector 운영 품질: 부분 완료
   - collector-backed statusline / popup 경로 완료
-  - tmux summary click의 collector-only contract 완료
-  - manual popup fallback 정책은 유지 중
+  - tmux summary click은 collector 우선이지만 필요 시 live fallback을 허용
+  - manual popup fallback 정책도 유지 중
 - 7. popup / dock / watch 역할 정리: 미시작
 - 8. 더 큰 아키텍처 확장: 보류
 
@@ -153,8 +153,8 @@ statusline UX 이후 로드맵
 
 현재 계약
 - tmux summary click:
-  - `--collector-only`
-  - live scan fallback 없음
+  - collector 우선
+  - 필요 시 live fallback 허용
 - manual `marmonitor popup`:
   - collector 우선
   - collector 없으면 live fallback 가능
@@ -224,7 +224,7 @@ Simple Made Easy 기준 경계
 
 운영
 - collector health
-- collector-only contract
+- collector-first contract
 - live fallback policy
 
 메타 결론

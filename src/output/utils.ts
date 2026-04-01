@@ -1018,7 +1018,12 @@ export function buildStatuslineAttentionRepresentatives(
     layout.pathMaxLength,
   );
 
-  const rawItems = [...immediate, ...recentComplete].slice(0, layout.itemCount);
+  const recentCompleteReserve = recentComplete.length > 0 ? 1 : 0;
+  const immediateBudget = Math.max(0, layout.itemCount - recentCompleteReserve);
+  const selectedImmediate = immediate.slice(0, immediateBudget);
+  const recentCompleteBudget = Math.max(0, layout.itemCount - selectedImmediate.length);
+  const selectedRecentComplete = recentComplete.slice(0, recentCompleteBudget);
+  const rawItems = [...selectedImmediate, ...selectedRecentComplete];
   if (rawItems.length === 0) return [];
 
   const unresolved = rawItems.filter((item) => item.kind !== "active");

@@ -127,4 +127,81 @@ describe("renderStatusline idle right rail", () => {
     );
     assert.match(text, /#\[range=user\|sum:idle]idle -#\[norange]$/);
   });
+
+  it("keeps one recent-complete item visible on the left rail within its retention window", async () => {
+    const text = await renderStatusline(
+      [
+        {
+          pid: 30,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/allow",
+          status: "Active",
+          phase: "permission",
+          lastActivityAt: now - 5,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 31,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/think-a",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 10,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 32,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/think-b",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 12,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 33,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/tool-a",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 14,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 34,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/tool-b",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 16,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 35,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/recent-complete",
+          status: "Idle",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+          idleSince: now - 20,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+      ],
+      "tmux-badges",
+      5,
+      220,
+      {
+        tmuxBadgeStyle: "plain",
+      },
+    );
+
+    assert.match(text, /#\[range=user\|pid:35]5 Cl recent-complete 20s#\[norange]/);
+    assert.doesNotMatch(text, /#\[range=user\|pid:34]5 🔧Cx tool-b 16s#\[norange]/);
+  });
 });

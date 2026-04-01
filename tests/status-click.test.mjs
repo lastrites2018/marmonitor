@@ -130,7 +130,7 @@ describe("status click helper", () => {
 
   it("builds a short message for empty summary targets", () => {
     assert.equal(buildSummaryEmptyMessage("agent:codex"), "No Codex sessions.");
-    assert.equal(buildSummaryEmptyMessage("issue"), "No issue sessions.");
+    assert.equal(buildSummaryEmptyMessage("issue"), "Nothing to review right now.");
   });
 
   it("targets the clicked client when showing a tmux status message", () => {

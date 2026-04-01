@@ -9,18 +9,18 @@ summary badge popup 계획 및 현황
 - summary badge 클릭 -> popup 열기: 완료
 - popup 내부 번호 선택 jump: 완료
 - popup 페이지 이동(`n`/`p`)과 종료(`q`/`Esc`): 완료
-- `⚠` popup의 `Stalled / Unmatched / Risk` 섹션 분리: 부분 완료
-  - `Stalled`, `Unmatched`는 실제 데이터로 렌더링됨
-  - `Risk`는 섹션 자리는 있으나 현재 실데이터는 비어 있음
-  - 이후 문서 기준은 `⚠ = stalled + persistent unmatched`이며, `Risk`는 UI에서 보이지 않게 두는 쪽으로 정리
-- tmux statusline click 경로의 collector-only popup open: 완료
+- `⚠` popup의 issue 섹션 정리: 완료
+  - 현재 UI는 `Inactive for a While`와 `Unresolved AI Processes` 두 섹션으로 렌더링됨
+  - `⚠ = stalled + persistent unmatched`, `transient unmatched` 제외가 반영됨
+  - `Risk`는 UI에 노출되지 않음
+- tmux statusline click 경로의 popup open: 완료
 - 수동 CLI popup의 live fallback 허용: 현재 유지 중
 
 핵심 흐름
 - `sum:*` range -> `marmonitor-status-click` -> `tmux display-popup`
 - popup 내부 명령:
-  - `marmonitor popup --summary-target <target> --interactive --collector-only`
-- 따라서 tmux에서 summary badge를 클릭할 때는 새 live scan 없이 collector snapshot만 사용한다.
+  - `marmonitor popup --summary-target <target> --interactive`
+- 따라서 tmux에서 summary badge를 클릭할 때는 collector 우선 경로를 타되, 필요 시 popup 명령의 live fallback을 사용한다.
 
 이미 완료된 구현 단위
 - `SummaryPopupTarget` 모델
@@ -35,7 +35,6 @@ summary badge popup 계획 및 현황
 - `renderSummaryPopupPage()`
 - `marmonitor popup --summary-target <target>`
 - `--interactive`
-- `--collector-only`
 - statusline summary badge의 `sum:*` clickable range
 - tmux click routing에서 `pid:*`, `sum:*`, `back` 처리
 
@@ -62,8 +61,8 @@ popup target 의미
 - `phase:thinking` -> attention 규칙상 유효한 recent thinking
 - `phase:tool` -> attention 규칙상 유효한 recent tool
 - `issue`
-  - 현재 구현: `Stalled + Unmatched + empty Risk placeholder`
-  - 이후 문서 기준: `Stalled + persistent unmatched`
+  - 현재 구현: `Stalled + persistent unmatched`
+  - popup heading은 `Inactive for a While` / `Unresolved AI Processes`
 
 현재 상호작용
 - summary badge 클릭 -> interactive popup chooser open
@@ -85,9 +84,8 @@ popup target 의미
 
 현재 계약
 - tmux summary click:
-  - collector snapshot only
-  - collector unhealthy면 popup open 실패
-  - live scan fallback 없음
+  - collector snapshot 우선
+  - collector snapshot이 없거나 읽기 실패하면 popup 명령의 live fallback 허용
 - 수동 CLI:
   - 기본은 collector 우선
   - collector가 없으면 `light` live snapshot fallback 가능
@@ -95,23 +93,23 @@ popup target 의미
 
 이 구분이 중요한 이유
 - tmux statusline click은 latency-sensitive 경로다.
-- 따라서 여기서는 collector-only가 맞다.
+- 다만 summary popup은 상태줄 본문 렌더보다 빈도가 훨씬 낮아서, 현재는 실패 대신 fallback을 허용하는 쪽이 실용적이다.
 - 반대로 수동 CLI popup은 디버깅/운영 도구 성격이 있으므로, 현재는 fallback 허용이 실용적이다.
 
 현재 남은 범위
 
 1. popup 데이터 계약을 더 명확히 고정
-- tmux 경로는 이미 collector-only다.
 - 남은 판단:
-  - 수동 `marmonitor popup`도 기본 collector-only로 바꿀지
-  - 아니면 현재처럼 manual fallback을 유지할지
+  - tmux summary click도 장기적으로 collector-only로 되돌릴지
+  - 아니면 현재처럼 collector 우선 + fallback 허용을 유지할지
+  - 수동 `marmonitor popup`은 현재처럼 manual fallback을 유지할지
 - 문서/도움말에서 이 차이를 더 명확히 드러낼 필요가 있다.
 
 2. `⚠`의 범주 단순화
-- 문서 기준은 `Risk`를 UI에서 숨기고, `issue`를 `stalled + persistent unmatched`로 좁히는 쪽이다.
+- 현재 구현은 이미 `issue = stalled + persistent unmatched` 기준과 `120초` grace period를 반영한다.
 - 남은 것은:
-  - `persistent unmatched`의 grace period를 `120초`로 고정하고
-  - popup heading / empty-state를 이 기준에 맞게 정리하는 일이다.
+  - 사용자-facing 용어와 내부 용어를 더 일관되게 정리하는 일
+  - diagnostics surface에서 transient unmatched를 어떻게 보여줄지 결정하는 일
 
 3. popup 내부 grouping / dedupe
 - 같은 repo나 같은 종류의 세션이 많을 때, 현재는 flat list다.
@@ -170,12 +168,12 @@ popup target 의미
 - filtered popup open
 - popup chooser 입력 루프
 - popup 내부 direct jump
-- `⚠`의 stalled/unmatched 분리
-- tmux click의 collector-only popup 경로
+- `⚠`의 `Inactive for a While / Unresolved AI Processes` 분리
+- tmux click의 summary popup 경로
 
 현재 문서 기준으로 "다음 단계"로 남겨야 하는 것
-- `persistent unmatched` 기준의 세부 문구 정리
-- `Risk` UI 비노출 정리
+- tmux summary popup data contract 재결정
+- diagnostics에서 transient unmatched를 어떤 이름으로 보여줄지 정리
 - popup grouping / dedupe
 - discoverability 개선
 - manual CLI popup의 data contract 재결정
@@ -184,7 +182,7 @@ popup target 의미
 메타 결론
 - summary popup은 더 이상 "계획 단계"가 아니라 "이미 동작하는 기능"이다.
 - 지금부터의 계획은 popup을 새로 여는 것이 아니라,
-  - collector-only 계약을 어디까지 강제할지,
+  - collector 우선 + fallback 계약을 어디까지 유지할지,
   - `⚠`를 얼마나 더 단순하고 설명 가능하게 만들지,
   - popup 목록을 얼마나 더 읽기 좋게 다듬을지
   를 정하는 것이다.

@@ -1423,6 +1423,89 @@ describe("statusline attention projection", () => {
     assert.match(representatives[0].label, /^roam-new \+1$/);
   });
 
+  it("keeps one recent-complete slot visible while its retention window is active", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "permission",
+          priority: 0,
+          pid: 40,
+          agentName: "Claude Code",
+          cwd: "/repo/allow",
+          status: "Active",
+          phase: "permission",
+          lastActivityAt: now - 5,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 41,
+          agentName: "Codex",
+          cwd: "/repo/think-a",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 10,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 42,
+          agentName: "Codex",
+          cwd: "/repo/think-b",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 12,
+        },
+        {
+          kind: "tool",
+          priority: 1,
+          pid: 43,
+          agentName: "Claude Code",
+          cwd: "/repo/tool-a",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 14,
+        },
+        {
+          kind: "tool",
+          priority: 1,
+          pid: 44,
+          agentName: "Codex",
+          cwd: "/repo/tool-b",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 16,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 45,
+          agentName: "Claude Code",
+          cwd: "/repo/recent-complete",
+          status: "Idle",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.equal(representatives.length, 5);
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid]),
+      [
+        ["permission", 40],
+        ["thinking", 41],
+        ["thinking", 42],
+        ["tool", 43],
+        ["active", 45],
+      ],
+    );
+  });
+
   it("renders tmux and plain statusline focus from the projected representatives", () => {
     const now = Math.floor(Date.now() / 1000);
     const items = [

@@ -7,8 +7,8 @@ summary popup UX 메모
 - summary badge 클릭 시 popup이 열린다.
 - popup은 이미 interactive chooser로 동작한다.
 - popup 내부에서 번호 입력으로 jump 가능하다.
-- `⚠` popup은 `Stalled / Unmatched / Risk` 섹션 구조를 가진다.
-- 이후 문서 기준은 `Risk`를 UI에서 숨기고, `⚠`를 `오래 멈춘 세션 + persistent unmatched`로 단순화하는 것이다.
+- `⚠` popup은 현재 `Inactive for a While / Unresolved AI Processes` 두 섹션으로 렌더링된다.
+- `⚠`는 현재 `오래 멈춘 세션 + persistent unmatched`를 뜻하고, `Risk`는 UI에 보이지 않는다.
 - 즉 현재의 핵심 갭은 "popup을 열 수 있느냐"가 아니라 "popup이 얼마나 읽기 쉽고 예측 가능한가"다.
 
 핵심 판단
@@ -53,16 +53,15 @@ summary popup UX 메모
 
 현재 상태
 - statusline에서는 `⚠ n`으로 압축
-- popup에서는 현재 `Stalled / Unmatched / Risk` 섹션 구조 사용
-- 이후 기준은 `Risk`를 숨기고 `Stalled / persistent unmatched`만 남기는 것이다.
+- popup에서는 현재 `Inactive for a While / Unresolved AI Processes` 두 섹션 사용
+- `transient unmatched`는 `120초` grace period 동안 숨기고, `Risk`는 UI에 노출하지 않는다.
 
 좋은 점
 - statusline은 얇게 유지되고, popup에서 의미를 복원하는 구조가 맞다.
 
 남은 UX 갭
-- transient unmatched를 `120초` grace period로 숨기는 기준
-- `Risk` placeholder를 UI에서 제거하는 방식
-- `Stalled`와 `Unmatched` 중 무엇이 더 먼저 보여야 하는지
+- `Stalled`와 `Unmatched`를 사용자-facing 용어와 내부 용어 중 무엇으로 문서화할지
+- `Inactive for a While`와 `Unresolved AI Processes`에 보조 설명 한 줄이 필요한지
 - 섹션별 설명 문구가 필요한지
 
 내 판단
@@ -128,7 +127,7 @@ summary popup UX 메모
 8. 현재 기준 추천 UX 우선순위
 
 1. summary/detail clickable 안내 문구 추가
-2. `⚠` popup heading / persistent unmatched 기준 / empty-risk 제거 정리
+2. `⚠` popup 보조 설명 문구와 diagnostics naming 정리
 3. chooser controls 문구와 page numbering 점검
 4. active / duplicate noise 축소
 5. 그 이후에만 grouping / dedupe 재검토
