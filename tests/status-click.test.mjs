@@ -119,6 +119,7 @@ describe("status click helper", () => {
     assert.match(args.at(-1), /popup/);
     assert.match(args.at(-1), /--summary-target/);
     assert.match(args.at(-1), /--interactive/);
+    assert.match(args.at(-1), /--collector-only/);
     assert.match(args.at(-1), /--target-client/);
   });
 });

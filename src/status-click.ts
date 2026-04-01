@@ -106,6 +106,7 @@ export function buildSummaryPopupTmuxArgs(
     "--summary-target",
     target,
     "--interactive",
+    "--collector-only",
     ...(configPath ? ["--config", configPath] : []),
     ...(targetClient ? ["--target-client", targetClient] : []),
   ]

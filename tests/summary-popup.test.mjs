@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildSummaryPopupSections,
   selectSummaryPopupItem,
   selectSummaryPopupItems,
   summaryPopupTitle,
@@ -111,6 +112,17 @@ describe("summary popup item selection", () => {
     assert.equal(selectSummaryPopupItem(agents, "phase:thinking", 1, { nowSec })?.pid, 20);
     assert.equal(selectSummaryPopupItem(agents, "phase:thinking", 2, { nowSec }), undefined);
   });
+
+  it("splits issue popup items into stalled and unmatched sections", () => {
+    const sections = buildSummaryPopupSections(agents, "issue", { nowSec });
+    assert.deepEqual(
+      sections.map((section) => [section.key, section.items.map((agent) => agent.pid)]),
+      [
+        ["stalled", [11]],
+        ["unmatched", [40]],
+      ],
+    );
+  });
 });
 
 describe("summary popup render", () => {
@@ -163,5 +175,30 @@ describe("summary popup render", () => {
 
     assert.match(text, /1\. Codex alpha\/marmonitor/);
     assert.match(text, /2\. Codex beta\/marmonitor/);
+  });
+
+  it("renders issue sections with continuous numbering", () => {
+    const text = renderSummaryPopup(
+      [
+        {
+          pid: 100,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/stalled",
+          status: "Stalled",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 5,
+        },
+        {
+          pid: 101,
+          agentName: "Claude Code",
+          cwd: "/Users/jaewankim/Desktop/orphan",
+          status: "Unmatched",
+        },
+      ],
+      "issue",
+    );
+
+    assert.match(text, /^Issue Sessions \(2\)/);
+    assert.match(text, /\n\nStalled \(1\)\n\n1\. ⚠ Codex stalled/);
+    assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
   });
 });

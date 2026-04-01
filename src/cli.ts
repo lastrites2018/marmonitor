@@ -39,6 +39,7 @@ import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
 import { selectSummaryPopupItem, selectSummaryPopupItems } from "./summary-popup/model.js";
 import { renderSummaryPopup } from "./summary-popup/render.js";
+import { loadSummaryPopupAgents } from "./summary-popup/service.js";
 import { parseSummaryPopupTarget } from "./summary-popup/shared.js";
 import { captureTmuxPaneOutput, resolveTmuxJumpTarget } from "./tmux/index.js";
 import { jumpBackForClient, jumpToAgentWithAnchor } from "./tmux/navigation.js";
@@ -897,6 +898,7 @@ program
   )
   .option("--config <path>", "Path to settings.json")
   .option("--interactive", "Choose and jump from inside the popup")
+  .option("--collector-only", "Require collector snapshot and skip live scan fallback")
   .option("--target-client <tty>", "tmux client tty to jump within")
   .action(async (opts) => {
     const target = parseSummaryPopupTarget(opts.summaryTarget);
@@ -907,16 +909,16 @@ program
 
     const requestedConfigPath = resolveLoadedConfigPath(resolveConfigPath(opts));
     const config = await loadConfig(requestedConfigPath);
-    const agents =
-      (await readHealthyCollectorSnapshotForRequest({
-        config,
-        requestedConfigPath,
-      })) ??
-      (await getAgentsSnapshot(config, {
-        enrichmentMode: "light",
-        includeStdoutHeuristic: true,
-        useSharedRuntimeSnapshots: true,
-      }));
+    const loaded = await loadSummaryPopupAgents({
+      config,
+      requestedConfigPath,
+      collectorOnly: Boolean(opts.collectorOnly),
+    });
+    const agents = loaded.agents;
+    if (!agents) {
+      console.error("Collector snapshot unavailable for popup.");
+      process.exit(1);
+    }
 
     if (!opts.interactive) {
       console.log(renderSummaryPopup(agents, target));

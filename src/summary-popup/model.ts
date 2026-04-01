@@ -11,6 +11,12 @@ export interface SummaryPopupSelections {
   itemsByTarget: Record<SummaryPopupTarget, AgentSession[]>;
 }
 
+export interface SummaryPopupSection {
+  key: "all" | "stalled" | "unmatched" | "risk";
+  title: string;
+  items: AgentSession[];
+}
+
 function isAlive(agent: AgentSession): boolean {
   return agent.status !== "Dead" && agent.status !== "Unmatched";
 }
@@ -125,4 +131,41 @@ export function summaryPopupTitle(target: SummaryPopupTarget, count: number): st
     case "issue":
       return `Issue Sessions (${count})`;
   }
+}
+
+export function buildSummaryPopupSections(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  options: AttentionBuildOptions = {},
+): SummaryPopupSection[] {
+  const selections = buildSummaryPopupSelections(agents, options);
+  if (target !== "issue") {
+    return [
+      {
+        key: "all",
+        title: summaryPopupTitle(target, selections.itemsByTarget[target].length),
+        items: selections.itemsByTarget[target],
+      },
+    ];
+  }
+
+  const stalled = orderedSummaryItems(
+    agents.filter((agent) => agent.status === "Stalled"),
+    selections.attentionKinds,
+  );
+  const unmatched = orderedSummaryItems(
+    agents.filter((agent) => agent.status === "Unmatched"),
+    selections.attentionKinds,
+  );
+  const risk: AgentSession[] = [];
+
+  return [
+    { key: "stalled" as const, title: `Stalled (${stalled.length})`, items: stalled },
+    {
+      key: "unmatched" as const,
+      title: `Unmatched (${unmatched.length})`,
+      items: unmatched,
+    },
+    { key: "risk" as const, title: `Risk (${risk.length})`, items: risk },
+  ].filter((section) => section.items.length > 0);
 }

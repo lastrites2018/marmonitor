@@ -177,4 +177,24 @@ describe("collector statusline serve policy", () => {
     assert.equal(matchesCollectorConfigPath(health, "/tmp/settings.json"), true);
     assert.equal(matchesCollectorConfigPath(health, "/tmp/other.json"), false);
   });
+
+  it("treats refreshing collector health as healthy when a recent snapshot is still available", () => {
+    const now = Date.now();
+    const health = {
+      pid: 123,
+      startedAt: now - 5_000,
+      lastTickAt: now - 100,
+      lastSuccessAt: now - 2_000,
+      snapshotGeneratedAt: now - 2_000,
+      state: "refreshing",
+      version: "test",
+      configPath: "/tmp/settings.json",
+      snapshotTtlMs: 10_000,
+      statuslineTtlMs: 10_000,
+      statuslineAttentionLimit: 5,
+    };
+
+    assert.equal(isCollectorHealthy(health, 10_000, now), true);
+    assert.equal(isCollectorHealthyForStatusline(health, now), true);
+  });
 });

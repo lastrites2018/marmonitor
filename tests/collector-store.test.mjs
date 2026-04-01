@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  readCollectorStatuslineForRequest,
   readCurrentCollectorStatusline,
   readHealthyCollectorSnapshot,
   readHealthyCollectorSnapshotForRequest,
@@ -16,6 +17,7 @@ import {
   collectorRunLockFile,
   collectorSnapshotFile,
   collectorStatuslineFile,
+  refreshCollectorRunLock,
   readCollectorHealth,
   readCollectorSnapshot,
   readCollectorStatusline,
@@ -114,6 +116,49 @@ describe("collector store", () => {
     await releaseCollectorRunLock(root);
   });
 
+  it("refreshes the collector run lock heartbeat without changing ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-lock-refresh-"));
+    const acquired = await acquireCollectorRunLock(root);
+    assert.equal(acquired, true);
+
+    const before = await stat(collectorRunLockFile(root));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await refreshCollectorRunLock(root);
+    const after = await stat(collectorRunLockFile(root));
+
+    assert.equal(after.mtimeMs >= before.mtimeMs, true);
+    await releaseCollectorRunLock(root);
+  });
+
+  it("does not steal a stale-looking collector lock while the owner pid is alive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-lock-alive-"));
+    const now = Date.now();
+    await mkdir(join(root, "marmonitor", "collector"), { recursive: true });
+    await writeFile(
+      collectorRunLockFile(root),
+      JSON.stringify({ pid: process.pid, createdAt: now - 60_000, updatedAt: now - 60_000 }),
+    );
+    const staleSec = (now - 60_000) / 1000;
+    await utimes(collectorRunLockFile(root), staleSec, staleSec);
+
+    const acquired = await acquireCollectorRunLock(root);
+    assert.equal(acquired, false);
+  });
+
+  it("reclaims a fresh-looking collector lock immediately when the recorded pid is gone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-lock-reclaim-"));
+    const now = Date.now();
+    await mkdir(join(root, "marmonitor", "collector"), { recursive: true });
+    await writeFile(
+      collectorRunLockFile(root),
+      JSON.stringify({ pid: -1, createdAt: now, updatedAt: now }),
+    );
+
+    const acquired = await acquireCollectorRunLock(root);
+    assert.equal(acquired, true);
+    await releaseCollectorRunLock(root);
+  });
+
   it("returns a healthy collector snapshot when health and snapshot are both present", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-client-"));
     const now = Date.now();
@@ -207,6 +252,35 @@ describe("collector store", () => {
     assert.equal(statusline, "AI7 | 10%");
   });
 
+  it("reuses the last good collector statusline while the collector is refreshing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-refreshing-statusline-"));
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 1004,
+        startedAt: now - 5_000,
+        lastTickAt: now - 100,
+        lastSuccessAt: now - 2_000,
+        snapshotGeneratedAt: now - 2_000,
+        state: "refreshing",
+        version: "test",
+        configPath: "/tmp/settings.json",
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorStatusline("compact", 5, undefined, "AI9 | 11%", root);
+
+    const statusline = await readCurrentCollectorStatusline({
+      requestedConfigPath: "/tmp/settings.json",
+      format: "compact",
+      root,
+    });
+    assert.equal(statusline, "AI9 | 11%");
+  });
+
   it("does not reuse a stale collector statusline older than the latest snapshot", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-stale-statusline-"));
     await writeCollectorStatusline("tmux-badges", 5, 214, "AI:0", root);
@@ -237,6 +311,42 @@ describe("collector store", () => {
       root,
     });
     assert.equal(statusline, undefined);
+  });
+
+  it("can still serve a recent stale collector statusline while a newer snapshot is being written", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-stale-serve-"));
+    const now = Date.now();
+    await writeCollectorStatusline("tmux-badges", 5, 214, "AI:7", root);
+    const slightlyStaleSec = (now - 5_000) / 1000;
+    await utimes(collectorStatuslineFile("tmux-badges", 5, 214, root), slightlyStaleSec, slightlyStaleSec);
+    await writeCollectorHealth(
+      {
+        pid: 1005,
+        startedAt: now - 5_000,
+        lastTickAt: now - 200,
+        lastSuccessAt: now - 2_000,
+        snapshotGeneratedAt: now,
+        state: "refreshing",
+        version: "test",
+        configPath: "/tmp/settings.json",
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+
+    const statusline = await readCollectorStatuslineForRequest({
+      requestedConfigPath: "/tmp/settings.json",
+      format: "tmux-badges",
+      width: 214,
+      root,
+    });
+    assert.deepEqual(statusline, {
+      value: "AI:7",
+      attentionLimit: 5,
+      freshness: "stale",
+    });
   });
 
   it("does not reuse collector snapshot artifacts when config paths do not match", async () => {

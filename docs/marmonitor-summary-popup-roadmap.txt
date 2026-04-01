@@ -10,13 +10,17 @@ summary popup 이후 로드맵
 - 기준 시점: 2026-04-01
 - 1. summary popup 1차 MVP: 완료
 - 2. summary popup 2차 인터랙션: 진행 중
-- 3. `⚠` 의미 복원: 미시작
+- 3. `⚠` 의미 복원: 부분 완료
+  - `Stalled / Unmatched` 섹션 분리 반영
+  - `Risk`는 placeholder만 있고 실제 데이터는 아직 없음
 - 4. attention UX 정제: 부분 완료
   - stale thinking/tool 강등 반영
   - active `•` 표식 제거 반영
   - dedupe / grouping 규칙은 미완
 - 5. collector 운영 품질 강화: 부분 완료
   - stale artifact 방지, config mismatch guard, health model 일부 반영
+  - refresh 중 last-good statusline 재사용 반영
+  - collector lock heartbeat / dead-pid reclaim 반영
   - auto-restart / diagnostics 확장은 미완
 - 6. popup / dock / watch 역할 정리: 미시작
 - 7. 더 큰 아키텍처 확장: 보류
@@ -42,7 +46,7 @@ summary popup 이후 로드맵
   - `✅`
   - `AI`
 - popup:
-  - read-only 또는 very light chooser
+  - 현재 구현은 read-only filtered popup
 - 기존 상세 항목 `pid` 클릭 점프는 그대로 유지
 
 핵심 구현 단위
@@ -55,6 +59,7 @@ summary popup 이후 로드맵
 수용 기준
 - badge 의미와 popup 결과가 정확히 일치
 - 기존 상세 항목 클릭 동작 회귀 없음
+- summary badge 클릭 시 popup이 안정적으로 열림
 
 2. summary popup 2차 인터랙션
 
@@ -77,6 +82,7 @@ summary popup 이후 로드맵
 수용 기준
 - popup에서 선택한 항목이 정확한 pane/session으로 이동
 - 현재 상세 item direct jump와 충돌 없음
+- statusline badge 클릭은 live scan 없이 collector snapshot만 사용
 
 1차 구현 메모
 - summary badge 클릭은 interactive popup으로 연다.
@@ -105,6 +111,7 @@ summary popup 이후 로드맵
 수용 기준
 - `⚠ n` 숫자와 popup 총합이 일치
 - 섹션별 의미가 사용자에게 분명함
+- summary badge 클릭으로 여는 popup이 statusline 성능을 다시 악화시키지 않음
 
 4. attention UX 정제
 
@@ -173,9 +180,9 @@ summary popup 이후 로드맵
 - 여전히 latency나 stability 이슈가 반복되는가
 
 우선순위
-1. popup 내 jump
-2. `⚠` 섹션 분리
-3. popup의 collector-only 데이터 계약 고정
+1. popup 내 jump의 상위 10개 제한 확장 판단
+2. `⚠`의 `Risk` 실데이터 모델링
+3. popup의 collector-only 데이터 계약을 statusline click 외 경로까지 더 엄격히 고정할지 결정
 4. attention dedupe / active 축소
 5. collector 운영 품질
 6. surface 역할 정리

@@ -6,7 +6,7 @@ import { profileAsync } from "../perf.js";
 import { acquireStatuslineRefreshLock, releaseStatuslineRefreshLock } from "../snapshot-cache.js";
 import { getAgentsSnapshot } from "../snapshot/service.js";
 import {
-  readCurrentCollectorStatusline,
+  readCollectorStatuslineForRequest,
   readHealthyCollectorSnapshotForRequest,
   startDetachedCollector,
 } from "./client.js";
@@ -67,13 +67,21 @@ export async function runStatuslineCommand(params: {
   let attentionLimit = 5;
 
   try {
-    const collectorStatusline = await readCurrentCollectorStatusline({
+    const collectorStatusline = await readCollectorStatuslineForRequest({
       requestedConfigPath,
       format: params.format,
       width: params.width,
     });
     if (collectorStatusline) {
-      return collectorStatusline;
+      if (collectorStatusline.freshness === "stale" && !isRefreshWorker) {
+        await spawnStatuslineRefreshWorker({
+          format: params.format,
+          attentionLimit: collectorStatusline.attentionLimit,
+          width: params.width,
+          configPath: params.configPath,
+        });
+      }
+      return collectorStatusline.value;
     }
 
     const config = await loadConfig(requestedConfigPath);

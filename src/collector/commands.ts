@@ -19,6 +19,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isPidAlive(pid: number | undefined): boolean {
+  if (!Number.isFinite(pid) || Number(pid) <= 0) return false;
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function registerCollectorCommands(params: {
   program: Command;
   resolveConfigPath: (opts: { config?: string }) => string | undefined;
@@ -34,14 +44,16 @@ export function registerCollectorCommands(params: {
       const ttlMs = resolveIntervalMs(opts.interval);
       const requestedConfigPath = resolveLoadedConfigPath(params.resolveConfigPath(opts));
       const existingHealth = await readCollectorHealth(collectorHealthMaxAgeMs(ttlMs));
+      const existingPidAlive = isPidAlive(existingHealth?.value?.pid);
       if (
+        existingPidAlive &&
         isCollectorHealthy(existingHealth?.value, ttlMs) &&
         matchesCollectorConfigPath(existingHealth?.value, requestedConfigPath)
       ) {
         console.log(`collector already running (pid ${existingHealth?.value?.pid})`);
         return;
       }
-      if (isCollectorHealthy(existingHealth?.value, ttlMs)) {
+      if (existingPidAlive && isCollectorHealthy(existingHealth?.value, ttlMs)) {
         console.log(
           `collector already running with a different config (${existingHealth?.value?.configPath ?? "defaults"})`,
         );
@@ -103,7 +115,7 @@ export function registerCollectorCommands(params: {
         return;
       }
 
-      if (!health?.value) {
+      if (!health?.value || !isPidAlive(health.value.pid)) {
         console.log("collector: not running");
         return;
       }

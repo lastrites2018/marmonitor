@@ -5,6 +5,7 @@ import type { StatuslineFormat } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
 import { resolveCliEntrypoint } from "./entrypoints.js";
 import {
+  canServeStaleStatusline,
   collectorHealthMaxAgeMs,
   isCollectorArtifactCurrent,
   isCollectorHealthy,
@@ -87,6 +88,23 @@ export async function readCurrentCollectorStatusline(params: {
   width?: number;
   root?: string;
 }): Promise<string | undefined> {
+  const statusline = await readCollectorStatuslineForRequest(params);
+  return statusline?.freshness === "current" ? statusline.value : undefined;
+}
+
+export async function readCollectorStatuslineForRequest(params: {
+  requestedConfigPath?: string;
+  format: StatuslineFormat;
+  width?: number;
+  root?: string;
+}): Promise<
+  | {
+      value: string;
+      attentionLimit: number;
+      freshness: "current" | "stale";
+    }
+  | undefined
+> {
   const health = await readCollectorHealth(Number.MAX_SAFE_INTEGER, params.root);
   if (!isCollectorHealthyForStatusline(health?.value)) {
     return undefined;
@@ -95,10 +113,15 @@ export async function readCurrentCollectorStatusline(params: {
     return undefined;
   }
   const attentionLimit = health?.value?.statuslineAttentionLimit;
+  const statuslineTtlMs = health?.value?.statuslineTtlMs;
   if (!Number.isFinite(attentionLimit)) {
     return undefined;
   }
+  if (!Number.isFinite(statuslineTtlMs)) {
+    return undefined;
+  }
   const currentAttentionLimit = Number(attentionLimit);
+  const currentStatuslineTtlMs = Number(statuslineTtlMs);
 
   const statusline = await readCollectorStatusline(
     params.format,
@@ -107,10 +130,24 @@ export async function readCurrentCollectorStatusline(params: {
     Number.MAX_SAFE_INTEGER,
     params.root,
   );
-  if (!isCollectorArtifactCurrent(statusline, health?.value)) {
+  if (!statusline) {
     return undefined;
   }
-  return statusline?.value;
+  if (isCollectorArtifactCurrent(statusline, health?.value)) {
+    return {
+      value: statusline.value,
+      attentionLimit: currentAttentionLimit,
+      freshness: "current",
+    };
+  }
+  if (canServeStaleStatusline(statusline.ageMs, currentStatuslineTtlMs)) {
+    return {
+      value: statusline.value,
+      attentionLimit: currentAttentionLimit,
+      freshness: "stale",
+    };
+  }
+  return undefined;
 }
 
 export async function startDetachedCollector(params: {
@@ -150,6 +187,8 @@ export async function stopCollectorProcess(
   try {
     process.kill(pid, "SIGTERM");
   } catch {
+    await releaseCollectorRunLock(root).catch(() => undefined);
+    await clearCollectorHealth(root).catch(() => undefined);
     return "missing";
   }
 

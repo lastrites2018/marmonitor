@@ -6,7 +6,9 @@ import type { CollectorHealth } from "./model.js";
 import { loadCollectorRuntime } from "./runtime.js";
 import {
   acquireCollectorRunLock,
+  readCollectorHealth,
   readCollectorSnapshot,
+  refreshCollectorRunLock,
   releaseCollectorRunLock,
   writeCachedStatusline,
   writeCollectorHealth,
@@ -53,7 +55,7 @@ async function refreshCollectorArtifacts(
   runtime: Awaited<ReturnType<typeof loadCollectorRuntime>>,
   options: CollectorLoopOptions,
   startedAt: number,
-): Promise<void> {
+): Promise<number> {
   const previousSnapshot = await readCollectorSnapshot(runtime.config.performance.snapshotTtlMs);
   const snapshot = await scanAgents(runtime.config, {
     enrichmentMode: "light",
@@ -84,6 +86,7 @@ async function refreshCollectorArtifacts(
     statuslineTtlMs: runtime.config.performance.statuslineTtlMs,
     statuslineAttentionLimit: runtime.config.display.statuslineAttentionLimit,
   });
+  return completedAt;
 }
 
 export async function runCollectorLoop(options: CollectorLoopOptions): Promise<void> {
@@ -94,13 +97,24 @@ export async function runCollectorLoop(options: CollectorLoopOptions): Promise<v
 
   const startedAt = Date.now();
   const initialRuntime = await loadCollectorRuntime(options.configPath);
+  const existingHealth = await readCollectorHealth(Number.MAX_SAFE_INTEGER);
+  let lastSuccessfulHealth =
+    existingHealth?.value?.snapshotGeneratedAt !== undefined
+      ? {
+          lastSuccessAt:
+            existingHealth.value.lastSuccessAt ?? existingHealth.value.snapshotGeneratedAt,
+          snapshotGeneratedAt: existingHealth.value.snapshotGeneratedAt,
+        }
+      : undefined;
   try {
     await writeCollectorHealth({
       pid: process.pid,
       startedAt,
       lastTickAt: startedAt,
+      lastSuccessAt: lastSuccessfulHealth?.lastSuccessAt,
       state: "starting",
       version: VERSION,
+      snapshotGeneratedAt: lastSuccessfulHealth?.snapshotGeneratedAt,
       configPath: initialRuntime.resolvedConfigPath,
       snapshotTtlMs: initialRuntime.config.performance.snapshotTtlMs,
       statuslineTtlMs: initialRuntime.config.performance.statuslineTtlMs,
@@ -112,27 +126,36 @@ export async function runCollectorLoop(options: CollectorLoopOptions): Promise<v
       try {
         const refreshingAt = Date.now();
         const runtime = await loadCollectorRuntime(options.configPath);
+        await refreshCollectorRunLock();
         await writeCollectorHealth({
           pid: process.pid,
           startedAt,
           lastTickAt: refreshingAt,
-          lastSuccessAt: refreshingAt,
+          lastSuccessAt: lastSuccessfulHealth?.lastSuccessAt,
           state: "refreshing",
           version: VERSION,
+          snapshotGeneratedAt: lastSuccessfulHealth?.snapshotGeneratedAt,
           configPath: runtime.resolvedConfigPath,
           snapshotTtlMs: runtime.config.performance.snapshotTtlMs,
           statuslineTtlMs: runtime.config.performance.statuslineTtlMs,
           statuslineAttentionLimit: runtime.config.display.statuslineAttentionLimit,
         });
-        await refreshCollectorArtifacts(runtime, options, startedAt);
+        const completedAt = await refreshCollectorArtifacts(runtime, options, startedAt);
+        lastSuccessfulHealth = {
+          lastSuccessAt: completedAt,
+          snapshotGeneratedAt: completedAt,
+        };
+        await refreshCollectorRunLock();
       } catch (error) {
         await writeCollectorHealth({
           pid: process.pid,
           startedAt,
           lastTickAt: Date.now(),
+          lastSuccessAt: lastSuccessfulHealth?.lastSuccessAt,
           lastErrorAt: Date.now(),
           state: "degraded",
           version: VERSION,
+          snapshotGeneratedAt: lastSuccessfulHealth?.snapshotGeneratedAt,
           errorMessage: error instanceof Error ? error.message : String(error),
           configPath: initialRuntime.resolvedConfigPath,
           snapshotTtlMs: initialRuntime.config.performance.snapshotTtlMs,

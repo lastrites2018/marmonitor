@@ -13,6 +13,13 @@ import type { CachedArtifact, CollectorHealth } from "./model.js";
 
 const COLLECTOR_LOCK_STALE_MS = 30_000;
 
+type CollectorRunLockPayload = {
+  pid: number;
+  createdAt: number;
+  updatedAt?: number;
+  recovered?: boolean;
+};
+
 function collectorDir(root = tmpdir()): string {
   return join(root, "marmonitor", "collector");
 }
@@ -37,6 +44,45 @@ export function collectorStatuslineFile(
 
 export function collectorRunLockFile(root = tmpdir()): string {
   return join(collectorDir(root), "collector.lock");
+}
+
+async function readCollectorRunLockPayload(
+  root = tmpdir(),
+): Promise<CollectorRunLockPayload | undefined> {
+  try {
+    const raw = await readFile(collectorRunLockFile(root), "utf8");
+    const parsed = JSON.parse(raw) as Partial<CollectorRunLockPayload>;
+    if (!Number.isFinite(parsed.pid) || !Number.isFinite(parsed.createdAt)) {
+      return undefined;
+    }
+    return {
+      pid: Number(parsed.pid),
+      createdAt: Number(parsed.createdAt),
+      updatedAt: Number.isFinite(parsed.updatedAt) ? Number(parsed.updatedAt) : undefined,
+      recovered: parsed.recovered === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!Number.isFinite(pid) || Number(pid) <= 0) return false;
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeCollectorRunLockPayload(
+  payload: CollectorRunLockPayload,
+  root = tmpdir(),
+): Promise<void> {
+  const path = collectorRunLockFile(root);
+  await mkdir(dirname(path), { recursive: true });
+  await writeCacheFileAtomically(path, JSON.stringify(payload));
 }
 
 export async function readCachedStatusline(
@@ -248,7 +294,8 @@ export async function acquireCollectorRunLock(root = tmpdir()): Promise<boolean>
   try {
     const handle = await open(path, "wx");
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+      const now = Date.now();
+      await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: now, updatedAt: now }));
     } finally {
       await handle.close();
     }
@@ -259,7 +306,14 @@ export async function acquireCollectorRunLock(root = tmpdir()): Promise<boolean>
 
     try {
       const lockStat = await stat(path);
-      if (Date.now() - lockStat.mtimeMs < COLLECTOR_LOCK_STALE_MS) {
+      const lockPayload = await readCollectorRunLockPayload(root);
+      if (isProcessAlive(lockPayload?.pid)) {
+        return false;
+      }
+      if (Date.now() - lockStat.mtimeMs < COLLECTOR_LOCK_STALE_MS && lockPayload) {
+        // The recorded owner is already gone, so reclaim immediately instead of
+        // waiting for the stale timeout window to elapse.
+      } else if (Date.now() - lockStat.mtimeMs < COLLECTOR_LOCK_STALE_MS) {
         return false;
       }
     } catch {
@@ -275,8 +329,9 @@ export async function acquireCollectorRunLock(root = tmpdir()): Promise<boolean>
     try {
       const handle = await open(path, "wx");
       try {
+        const now = Date.now();
         await handle.writeFile(
-          JSON.stringify({ pid: process.pid, createdAt: Date.now(), recovered: true }),
+          JSON.stringify({ pid: process.pid, createdAt: now, updatedAt: now, recovered: true }),
         );
       } finally {
         await handle.close();
@@ -286,6 +341,20 @@ export async function acquireCollectorRunLock(root = tmpdir()): Promise<boolean>
       return false;
     }
   }
+}
+
+export async function refreshCollectorRunLock(root = tmpdir()): Promise<void> {
+  const existing = await readCollectorRunLockPayload(root);
+  const now = Date.now();
+  await writeCollectorRunLockPayload(
+    {
+      pid: process.pid,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      recovered: existing?.recovered,
+    },
+    root,
+  );
 }
 
 export async function releaseCollectorRunLock(root = tmpdir()): Promise<void> {
