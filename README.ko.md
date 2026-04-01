@@ -119,6 +119,14 @@ marmonitor setup tmux
 
 upstream [marmonitor-tmux](https://github.com/mjjo16/marmonitor-tmux) 플러그인을 `~/.tmux.conf`에 추가하는 빠른 기본 경로입니다. tmux 안에서 `prefix + I`을 눌러 활성화하세요.
 
+현재 tmux가 어떤 방식으로 연결돼 있는지 진단하려면 아래 명령을 실행하면 됩니다.
+
+```bash
+marmonitor update-integration
+```
+
+이 명령은 진단 전용입니다. tmux 설정을 자동으로 수정하거나 pull/reload를 대신 실행하지 않습니다.
+
 다만 이 포크의 현재 저지연 워크플로는 플러그인만으로 완결된다고 보기보다, 아래 구성까지 함께 쓰는 개인 설정을 기준으로 설명하는 편이 정확합니다.
 
 - collector 실행 (`marmonitor collector start`)

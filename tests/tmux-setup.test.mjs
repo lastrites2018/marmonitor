@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 
 // We test the pure functions directly — they operate on file paths, not global state.
 // Import will work after build.
 import {
   addMarmonitorPlugin,
+  detectTmuxIntegrationStatus,
+  getDefaultTmuxConfPath,
+  getDefaultTmuxPluginDir,
   hasMarmonitorPlugin,
   removeMarmonitorPlugin,
 } from "../dist/tmux/setup.js";
@@ -21,6 +24,11 @@ async function withTmpConf(content, fn) {
   } finally {
     await rm(dir, { recursive: true });
   }
+}
+
+async function mkdirp(path) {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(path, { recursive: true });
 }
 
 describe("hasMarmonitorPlugin", () => {
@@ -147,6 +155,67 @@ describe("removeMarmonitorPlugin", () => {
       const after = await readFile(confPath, "utf-8");
       assert.ok(!after.includes("marmonitor-tmux"));
       assert.ok(after.includes("set -g status on"));
+    });
+  });
+});
+
+describe("tmux integration diagnostics", () => {
+  it("builds default tmux paths from the home directory", () => {
+    assert.equal(getDefaultTmuxConfPath("/tmp/home"), "/tmp/home/.tmux.conf");
+    assert.equal(getDefaultTmuxPluginDir("/tmp/home"), "/tmp/home/.tmux/plugins/marmonitor-tmux");
+  });
+
+  it("detects local run-shell wiring separately from plugin checkouts", async () => {
+    await withTmpConf("run-shell ~/src/marmonitor/tmux/marmonitor.tmux\n", async (confPath) => {
+      const status = await detectTmuxIntegrationStatus({
+        confPath,
+        pluginDir: join(dirname(confPath), ".tmux", "plugins", "marmonitor-tmux"),
+      });
+      assert.equal(status.mode, "local");
+      assert.match(status.localRunShellPath ?? "", /marmonitor\.tmux$/);
+    });
+  });
+
+  it("detects a configured-but-missing plugin checkout", async () => {
+    await withTmpConf("set -g @plugin 'mjjo16/marmonitor-tmux'\n", async (confPath) => {
+      const status = await detectTmuxIntegrationStatus({
+        confPath,
+        pluginDir: join(dirname(confPath), ".tmux", "plugins", "marmonitor-tmux"),
+      });
+      assert.equal(status.mode, "missing");
+    });
+  });
+
+  it("detects a git-backed plugin checkout as tpm mode", async () => {
+    await withTmpConf("set -g @plugin 'mjjo16/marmonitor-tmux'\n", async (confPath) => {
+      const pluginDir = join(dirname(confPath), ".tmux", "plugins", "marmonitor-tmux");
+      await mkdirp(pluginDir);
+      await mkdirp(join(pluginDir, ".git"));
+      const status = await detectTmuxIntegrationStatus({ confPath, pluginDir });
+      assert.equal(status.mode, "tpm");
+    });
+  });
+
+  it("detects a non-git plugin checkout as not_git mode", async () => {
+    await withTmpConf(
+      "run-shell ~/.tmux/plugins/marmonitor-tmux/marmonitor.tmux\n",
+      async (confPath) => {
+        const pluginDir = join(dirname(confPath), ".tmux", "plugins", "marmonitor-tmux");
+        await mkdirp(pluginDir);
+        const status = await detectTmuxIntegrationStatus({ confPath, pluginDir });
+        assert.equal(status.mode, "not_git");
+        assert.match(status.pluginRunShellPath ?? "", /marmonitor\.tmux$/);
+      },
+    );
+  });
+
+  it("returns unconfigured when neither plugin wiring nor local run-shell is present", async () => {
+    await withTmpConf("set -g status on\n", async (confPath) => {
+      const status = await detectTmuxIntegrationStatus({
+        confPath,
+        pluginDir: join(dirname(confPath), ".tmux", "plugins", "marmonitor-tmux"),
+      });
+      assert.equal(status.mode, "unconfigured");
     });
   });
 });

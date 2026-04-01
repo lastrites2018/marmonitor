@@ -119,6 +119,14 @@ marmonitor setup tmux
 
 This installs the upstream [marmonitor-tmux](https://github.com/mjjo16/marmonitor-tmux) plugin as a convenient baseline. Then press `prefix + I` inside tmux to activate.
 
+To diagnose what tmux is currently using, run:
+
+```bash
+marmonitor update-integration
+```
+
+This is a diagnostic command only. It does not pull, reload, or rewrite tmux state for you.
+
 For this fork's current low-latency workflow, treat that plugin path as a starting point, not as the complete source of truth. The exact behavior described in this README assumes:
 
 - a running collector (`marmonitor collector start`)

@@ -124,6 +124,7 @@ function buildHelpAppendix(): string {
     "  clean         Review or kill unmatched leftovers",
     "  jump-back     Return to the first pre-jump tmux location for this client",
     "  popup         Render a filtered tmux popup payload",
+    "  update-integration  Diagnose current tmux integration wiring",
     "  debug-phase   Inspect raw phase signals for one PID",
     "  guard         Claude hook evaluator; fail-open on malformed input/errors",
     "  settings-*    Locate, inspect, or initialize settings.json",
@@ -1206,6 +1207,59 @@ program
       console.log("✓ Restored tmux status bar to single line");
     } catch {
       console.log("  tmux not running — restart tmux to apply changes");
+    }
+  });
+
+program
+  .command("update-integration")
+  .description("Diagnose the current tmux integration wiring and next sync step")
+  .option("--quiet", "Print only the detected integration mode")
+  .action(async (opts) => {
+    const { detectTmuxIntegrationStatus, getDefaultTmuxConfPath, getDefaultTmuxPluginDir } =
+      await import("./tmux/setup.js");
+    const home = (await import("node:os")).homedir();
+    const confPath = getDefaultTmuxConfPath(home);
+    const pluginDir = getDefaultTmuxPluginDir(home);
+    const status = await detectTmuxIntegrationStatus({
+      confPath,
+      pluginDir,
+    });
+
+    if (opts.quiet) {
+      console.log(status.mode);
+      return;
+    }
+
+    console.log(`Integration mode: ${status.mode}`);
+    console.log(`tmux.conf: ${status.confPath}`);
+    if (status.localRunShellPath) {
+      console.log(`Local run-shell: ${status.localRunShellPath}`);
+    } else if (status.pluginRunShellPath) {
+      console.log(`Plugin run-shell: ${status.pluginRunShellPath}`);
+    }
+    console.log(`Plugin dir: ${status.pluginDir}`);
+
+    switch (status.mode) {
+      case "local":
+        console.log("Detected local run-shell wiring.");
+        console.log("Next step: reload tmux to pick up local changes.");
+        break;
+      case "missing":
+        console.log("tmux is configured for marmonitor, but the plugin checkout is missing.");
+        console.log("Next step: run prefix+I in tmux, or install the plugin checkout manually.");
+        break;
+      case "tpm":
+        console.log("Detected a git-backed tmux plugin checkout.");
+        console.log("Next step: run prefix+U in tmux, or git -C <pluginDir> pull --ff-only.");
+        break;
+      case "not_git":
+        console.log("Plugin directory exists, but it is not a git checkout.");
+        console.log("Next step: reinstall the plugin or sync it manually.");
+        break;
+      case "unconfigured":
+        console.log("No marmonitor tmux integration is configured yet.");
+        console.log("Next step: run marmonitor setup tmux.");
+        break;
     }
   });
 

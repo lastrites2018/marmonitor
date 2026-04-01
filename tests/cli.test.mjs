@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -64,6 +66,11 @@ describe("config CLI helpers", () => {
     assert.match(output, /integration\.tmux\.badgeStyle/);
     assert.match(output, /plain" \| "minimal" \| "pill/);
   });
+
+  it("includes update-integration in help output", () => {
+    const output = runCli(["--help"]);
+    assert.match(output, /update-integration/);
+  });
 });
 
 describe("postinstall/preuninstall scripts", () => {
@@ -90,5 +97,47 @@ describe("postinstall/preuninstall scripts", () => {
     });
     // Should not throw. Output may be empty if no tmux.conf plugin line.
     assert.equal(typeof output, "string");
+  });
+});
+
+describe("tmux integration diagnostics CLI", () => {
+  it("prints unconfigured in quiet mode when no tmux wiring exists", async () => {
+    const home = await mkdtemp(join(tmpdir(), "marmonitor-cli-home-"));
+    try {
+      const output = execFileSync("node", [cliPath, "update-integration", "--quiet"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TERM_PROGRAM: "Ghostty",
+          HOME: home,
+        },
+      });
+      assert.equal(output.trim(), "unconfigured");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("prints local in quiet mode for local run-shell wiring", async () => {
+    const home = await mkdtemp(join(tmpdir(), "marmonitor-cli-home-"));
+    try {
+      await writeFile(
+        join(home, ".tmux.conf"),
+        "run-shell ~/src/marmonitor/tmux/marmonitor.tmux\n",
+      );
+      const output = execFileSync("node", [cliPath, "update-integration", "--quiet"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TERM_PROGRAM: "Ghostty",
+          HOME: home,
+        },
+      });
+      assert.equal(output.trim(), "local");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

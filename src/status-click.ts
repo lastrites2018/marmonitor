@@ -126,9 +126,7 @@ export function buildTmuxDisplayMessageArgs(message: string, targetClient?: stri
   return args;
 }
 
-export type SummaryClickAction =
-  | { kind: "popup" }
-  | { kind: "message"; message: string };
+export type SummaryClickAction = { kind: "popup" } | { kind: "message"; message: string };
 
 export function buildSummaryPopupTmuxArgs(
   target: SummaryPopupTarget,

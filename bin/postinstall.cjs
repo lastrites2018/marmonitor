@@ -15,6 +15,8 @@ const msg = `
   Setup:
     $ marmonitor setup tmux       Add tmux plugin to ~/.tmux.conf
     Then press prefix+I in tmux to activate.
+    $ marmonitor update-integration
+      Diagnose whether tmux is using local wiring, TPM, or a missing checkout.
 
   Commands:
     $ marmonitor status           Show all AI sessions
