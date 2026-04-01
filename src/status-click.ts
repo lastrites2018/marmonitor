@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
+import { resolveCliEntrypoint } from "./collector/entrypoints.js";
 import { loadConfig, resolveConfigPath } from "./config/index.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { type SummaryPopupTarget, parseSummaryRange } from "./summary-popup/shared.js";
 import { jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
 
@@ -11,8 +13,27 @@ export function extractPidFromStatusRange(value: string | undefined): string | u
   return match?.[1];
 }
 
+export type StatusClickTarget =
+  | { kind: "pid"; pid: number }
+  | { kind: "summary"; target: SummaryPopupTarget };
+
+export function parseStatusClickTarget(value: string | undefined): StatusClickTarget | undefined {
+  const pid = extractPidFromStatusRange(value);
+  if (pid) {
+    const parsed = Number.parseInt(pid, 10);
+    return Number.isFinite(parsed) ? { kind: "pid", pid: parsed } : undefined;
+  }
+
+  const summaryTarget = parseSummaryRange(value);
+  if (summaryTarget) {
+    return { kind: "summary", target: summaryTarget };
+  }
+
+  return undefined;
+}
+
 export function parseStatusClickArgs(args: string[]): {
-  pid?: string;
+  target?: StatusClickTarget;
   configPath?: string;
   targetClient?: string;
 } {
@@ -39,7 +60,7 @@ export function parseStatusClickArgs(args: string[]): {
   }
 
   return {
-    pid: extractPidFromStatusRange(directRange),
+    target: parseStatusClickTarget(directRange),
     configPath,
     targetClient,
   };
@@ -64,11 +85,54 @@ function refreshTmuxClient(targetClient?: string): void {
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function openSummaryPopup(
+  target: SummaryPopupTarget,
+  configPath?: string,
+  targetClient?: string,
+): boolean {
+  const command = [
+    process.execPath,
+    resolveCliEntrypoint(),
+    "popup",
+    "--summary-target",
+    target,
+    ...(configPath ? ["--config", configPath] : []),
+  ]
+    .map(shellQuote)
+    .join(" ");
+
+  const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
+  if (targetClient) {
+    args.push("-t", targetClient);
+  }
+  args.push(command);
+
+  try {
+    execFileSync("tmux", args, {
+      stdio: "ignore",
+      env: process.env,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runStatusClick(args: string[] = process.argv.slice(2)): Promise<number> {
   const options = parseStatusClickArgs(args);
-  if (!options.pid) return 0;
-  const pid = Number.parseInt(options.pid, 10);
-  if (!Number.isFinite(pid)) return 0;
+  if (!options.target) return 0;
+
+  if (options.target.kind === "summary") {
+    return openSummaryPopup(options.target.target, options.configPath, options.targetClient)
+      ? 0
+      : 1;
+  }
+
+  const pid = options.target.pid;
 
   const requestedConfigPath = resolveConfigPath(options.configPath);
   const config = await loadConfig(requestedConfigPath);

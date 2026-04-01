@@ -612,12 +612,18 @@ describe("buildStatuslineSummary", () => {
       "⏳ Claude mjjo allow",
     );
     assert.match(text, /Cl 14/);
+    assert.match(text, /#\[range=user\|summary:agent:claude]Cl 14#\[norange]/);
     assert.match(text, /Cx 2/);
+    assert.match(text, /#\[range=user\|summary:agent:codex]Cx 2#\[norange]/);
     assert.match(text, /Gm 3/);
     assert.match(text, /⏳ 2/);
+    assert.match(text, /#\[range=user\|summary:phase:permission]⏳ 2#\[norange]/);
     assert.match(text, /⚠ 2/);
+    assert.match(text, /#\[range=user\|summary:issue]⚠ 2#\[norange]/);
     assert.match(text, /🤔 3/);
+    assert.match(text, /#\[range=user\|summary:phase:thinking]🤔 3#\[norange]/);
     assert.match(text, /🔧 1/);
+    assert.match(text, /#\[range=user\|summary:phase:tool]🔧 1#\[norange]/);
     assert.match(text, /Claude mjjo allow/);
     assert.doesNotMatch(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
@@ -647,6 +653,7 @@ describe("buildStatuslineSummary", () => {
     assert.match(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
     assert.doesNotMatch(text, /bg=#fab387/);
+    assert.match(text, /#\[range=user\|summary:agent:claude].*Cl 14.*#\[norange]/);
   });
 
   it("keeps pill badge style available as an option", () => {
@@ -671,6 +678,7 @@ describe("buildStatuslineSummary", () => {
 
     assert.match(text, //);
     assert.match(text, /bg=#fab387/);
+    assert.match(text, /#\[range=user\|summary:agent:claude].*#\[norange]/);
   });
 
   it("builds shared status pills for terminal adapters", () => {
@@ -694,8 +702,16 @@ describe("buildStatuslineSummary", () => {
       ["Cl 14", "Cx 2"],
     );
     assert.deepEqual(
+      agents.map((pill) => pill.summaryTarget),
+      ["agent:claude", "agent:codex"],
+    );
+    assert.deepEqual(
       alerts.map((pill) => pill.label),
       ["⏳ 1", "⚠ 3", "🤔 2", "🔧 1"],
+    );
+    assert.deepEqual(
+      alerts.map((pill) => pill.summaryTarget),
+      ["phase:permission", "issue", "phase:thinking", "phase:tool"],
     );
   });
 

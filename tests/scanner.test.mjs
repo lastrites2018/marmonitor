@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -564,6 +564,7 @@ describe("indexCodexSessions", () => {
       ].join("\n"),
       "utf8",
     );
+    const fileStat = await stat(filePath);
 
     setCodexIndexCache(undefined);
     const config = getDefaults();
@@ -573,7 +574,7 @@ describe("indexCodexSessions", () => {
 
     assert.ok(matched);
     assert.ok(matched.lastActivityAt);
-    assert.ok(Math.abs(matched.lastActivityAt - Date.now() / 1000) < 10);
+    assert.ok(Math.abs(matched.lastActivityAt - fileStat.mtimeMs / 1000) < 1);
   });
 
   it("can index Codex sessions without token usage in light mode", async () => {

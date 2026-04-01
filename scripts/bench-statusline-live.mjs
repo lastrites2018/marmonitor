@@ -13,7 +13,8 @@ import { loadConfig } from "../dist/config/index.js";
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const binPath = join(repoRoot, "bin", "marmonitor.js");
-const cacheRoot = join(os.tmpdir(), "marmonitor");
+const benchTmpRoot = join(os.tmpdir(), `marmonitor-bench-${process.pid}-${Date.now()}`);
+const cacheRoot = join(benchTmpRoot, "marmonitor");
 
 function roundMs(value) {
   return Number(value.toFixed(1));
@@ -97,6 +98,7 @@ async function runMarmonitor(args, env = {}) {
       cwd: repoRoot,
       env: {
         ...process.env,
+        TMPDIR: benchTmpRoot,
         ...env,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -150,8 +152,23 @@ async function stopCollectorBestEffort() {
   }
 }
 
+async function removeWithRetry(path, retries = 4) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" ? error.code : undefined;
+      if ((code !== "ENOTEMPTY" && code !== "EBUSY") || attempt === retries - 1) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+}
+
 async function clearAllCaches() {
-  await rm(cacheRoot, { recursive: true, force: true });
+  await removeWithRetry(cacheRoot);
   await mkdir(cacheRoot, { recursive: true });
 }
 
@@ -342,6 +359,7 @@ async function main() {
     printHumanSummary(summary);
   } finally {
     await stopCollectorBestEffort();
+    await removeWithRetry(benchTmpRoot).catch(() => undefined);
   }
 }
 

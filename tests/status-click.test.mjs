@@ -4,6 +4,7 @@ import {
   extractPidFromStatusRange,
   findClickedAgent,
   parseStatusClickArgs,
+  parseStatusClickTarget,
 } from "../dist/status-click.js";
 
 describe("status click helper", () => {
@@ -19,7 +20,7 @@ describe("status click helper", () => {
 
   it("parses config path alongside the clicked range", () => {
     assert.deepEqual(parseStatusClickArgs(["pid:99", "--config", "/tmp/marmonitor.json"]), {
-      pid: "99",
+      target: { kind: "pid", pid: 99 },
       configPath: "/tmp/marmonitor.json",
       targetClient: undefined,
     });
@@ -35,7 +36,7 @@ describe("status click helper", () => {
         "/tmp/marmonitor.json",
       ]),
       {
-        pid: "99",
+        target: { kind: "pid", pid: 99 },
         configPath: "/tmp/marmonitor.json",
         targetClient: "/dev/ttys032",
       },
@@ -44,10 +45,39 @@ describe("status click helper", () => {
 
   it("accepts --target-client as an alias for the target tty", () => {
     assert.deepEqual(parseStatusClickArgs(["pid:99", "--target-client", "/dev/ttys040"]), {
-      pid: "99",
+      target: { kind: "pid", pid: 99 },
       configPath: undefined,
       targetClient: "/dev/ttys040",
     });
+  });
+
+  it("parses summary click targets", () => {
+    assert.deepEqual(parseStatusClickTarget("summary:agent:claude"), {
+      kind: "summary",
+      target: "agent:claude",
+    });
+    assert.deepEqual(parseStatusClickTarget("pid:42"), {
+      kind: "pid",
+      pid: 42,
+    });
+    assert.equal(parseStatusClickTarget("summary:unknown"), undefined);
+  });
+
+  it("parses summary click args alongside config and client tty", () => {
+    assert.deepEqual(
+      parseStatusClickArgs([
+        "summary:phase:thinking",
+        "--client-tty",
+        "/dev/ttys040",
+        "--config",
+        "/tmp/marmonitor.json",
+      ]),
+      {
+        target: { kind: "summary", target: "phase:thinking" },
+        configPath: "/tmp/marmonitor.json",
+        targetClient: "/dev/ttys040",
+      },
+    );
   });
 
   it("finds the clicked agent by pid", () => {

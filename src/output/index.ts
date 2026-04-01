@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import * as si from "systeminformation";
 import { profileAsync } from "../perf.js";
+import { buildSummaryPopupSelections } from "../summary-popup/model.js";
 import type { TmuxJumpResult } from "../tmux/index.js";
 import type {
   AgentSession,
@@ -524,15 +525,16 @@ export async function renderStatusline(
     }
 
     const sys = await getSystemInfo();
-    const waitingCount = alive.filter((a) => a.phase === "permission").length;
+    const summarySelections = buildSummaryPopupSelections(agents);
+    const waitingCount = summarySelections.itemsByTarget["phase:permission"].length;
     const stalledCount = alive.filter((a) => a.status === "Stalled").length;
     const activeCount = alive.filter((a) => a.status === "Active").length;
     const highCpuCount = alive.filter((a) => a.cpuPercent >= 10).length;
-    const thinkingCount = alive.filter((a) => a.phase === "thinking").length;
-    const toolCount = alive.filter((a) => a.phase === "tool").length;
-    const claudeCount = alive.filter((a) => a.agentName === "Claude Code").length;
-    const codexCount = alive.filter((a) => a.agentName === "Codex").length;
-    const geminiCount = alive.filter((a) => a.agentName === "Gemini").length;
+    const thinkingCount = summarySelections.itemsByTarget["phase:thinking"].length;
+    const toolCount = summarySelections.itemsByTarget["phase:tool"].length;
+    const claudeCount = summarySelections.itemsByTarget["agent:claude"].length;
+    const codexCount = summarySelections.itemsByTarget["agent:codex"].length;
+    const geminiCount = summarySelections.itemsByTarget["agent:gemini"].length;
     const snapshot = {
       aliveCount: alive.length,
       waitingCount,
@@ -552,12 +554,10 @@ export async function renderStatusline(
 
     if (format === "tmux-badges") {
       const style = options.tmuxBadgeStyle ?? "plain";
-      const focusText = buildTmuxAttentionPills(
-        buildJumpAttentionItems(agents),
-        attentionLimit,
-        width,
-        style,
-      );
+      const jumpItems = buildJumpAttentionItems(agents);
+      const focusText = buildTmuxAttentionPills(jumpItems, attentionLimit, width, style, {
+        ordered: true,
+      });
       return buildTmuxBadgeBar(snapshot, focusText, style);
     }
 

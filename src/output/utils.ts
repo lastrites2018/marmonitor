@@ -1,3 +1,5 @@
+import type { SummaryPopupTarget } from "../summary-popup/shared.js";
+import { serializeSummaryRange } from "../summary-popup/shared.js";
 import type { AgentSession, SessionPhase } from "../types.js";
 
 /**
@@ -86,7 +88,10 @@ function statuslineRepoLabel(cwd: string): string {
   return parts.at(-1) ?? label;
 }
 
-function buildStatuslinePathLabels(items: Array<{ cwd: string }>, maxLength: number): string[] {
+export function buildStatuslinePathLabels(
+  items: Array<{ cwd: string }>,
+  maxLength: number,
+): string[] {
   const repoLabels = items.map((item) => statuslineRepoLabel(item.cwd));
   const cwdSets = new Map<string, Set<string>>();
 
@@ -262,6 +267,7 @@ export interface StatusPill {
   label: string;
   fg: string;
   bg: string;
+  summaryTarget?: SummaryPopupTarget;
 }
 
 export interface PhaseDecayConfig {
@@ -683,13 +689,28 @@ export function buildStatusPills(snapshot: StatuslineSnapshot): {
 } {
   const agents: StatusPill[] = [];
   if ((snapshot.claudeCount ?? 0) > 0) {
-    agents.push({ label: `Cl ${snapshot.claudeCount}`, fg: "#1e1e2e", bg: "#fab387" });
+    agents.push({
+      label: `Cl ${snapshot.claudeCount}`,
+      fg: "#1e1e2e",
+      bg: "#fab387",
+      summaryTarget: "agent:claude",
+    });
   }
   if ((snapshot.codexCount ?? 0) > 0) {
-    agents.push({ label: `Cx ${snapshot.codexCount}`, fg: "#1e1e2e", bg: "#94e2d5" });
+    agents.push({
+      label: `Cx ${snapshot.codexCount}`,
+      fg: "#1e1e2e",
+      bg: "#94e2d5",
+      summaryTarget: "agent:codex",
+    });
   }
   if ((snapshot.geminiCount ?? 0) > 0) {
-    agents.push({ label: `Gm ${snapshot.geminiCount}`, fg: "#1e1e2e", bg: "#89b4fa" });
+    agents.push({
+      label: `Gm ${snapshot.geminiCount}`,
+      fg: "#1e1e2e",
+      bg: "#89b4fa",
+      summaryTarget: "agent:gemini",
+    });
   }
   if (agents.length === 0) {
     agents.push({ label: `AI ${snapshot.aliveCount}`, fg: "#1e1e2e", bg: "#cba6f7" });
@@ -697,20 +718,36 @@ export function buildStatusPills(snapshot: StatuslineSnapshot): {
 
   const alerts: StatusPill[] = [];
   if (snapshot.waitingCount > 0) {
-    alerts.push({ label: `⏳ ${snapshot.waitingCount}`, fg: "#11111b", bg: "#f38ba8" });
+    alerts.push({
+      label: `⏳ ${snapshot.waitingCount}`,
+      fg: "#11111b",
+      bg: "#f38ba8",
+      summaryTarget: "phase:permission",
+    });
   }
   if (snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount > 0) {
     alerts.push({
       label: `⚠ ${snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount}`,
       fg: "#11111b",
       bg: "#f9e2af",
+      summaryTarget: "issue",
     });
   }
   if ((snapshot.thinkingCount ?? 0) > 0) {
-    alerts.push({ label: `🤔 ${snapshot.thinkingCount}`, fg: "#11111b", bg: "#cba6f7" });
+    alerts.push({
+      label: `🤔 ${snapshot.thinkingCount}`,
+      fg: "#11111b",
+      bg: "#cba6f7",
+      summaryTarget: "phase:thinking",
+    });
   }
   if ((snapshot.toolCount ?? 0) > 0) {
-    alerts.push({ label: `🔧 ${snapshot.toolCount}`, fg: "#11111b", bg: "#a6e3a1" });
+    alerts.push({
+      label: `🔧 ${snapshot.toolCount}`,
+      fg: "#11111b",
+      bg: "#a6e3a1",
+      summaryTarget: "phase:tool",
+    });
   }
   if (alerts.length === 0) {
     alerts.push({ label: `✅ ${snapshot.activeCount}`, fg: "#11111b", bg: "#a6e3a1" });
@@ -829,18 +866,19 @@ export function buildTmuxBadgeBar(
   style: TmuxBadgeStyle = "plain",
 ): string {
   const { agents, alerts } = buildStatusPills(snapshot);
-  const agentPills =
-    style === "pill"
-      ? agents.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
-      : style === "minimal"
-        ? agents.map((pill) => tmuxTextAccent(pill.label, pill.bg))
-        : agents.map((pill) => pill.label);
-  const alertPills =
-    style === "pill"
-      ? alerts.map((pill) => tmuxPill(pill.label, pill.fg, pill.bg))
-      : style === "minimal"
-        ? alerts.map((pill) => tmuxTextAccent(pill.label, pill.bg))
-        : alerts.map((pill) => pill.label);
+  const renderBadge = (pill: StatusPill): string => {
+    const content =
+      style === "pill"
+        ? tmuxPill(pill.label, pill.fg, pill.bg)
+        : style === "minimal"
+          ? tmuxTextAccent(pill.label, pill.bg)
+          : pill.label;
+    return pill.summaryTarget
+      ? tmuxUserRange(serializeSummaryRange(pill.summaryTarget), content)
+      : content;
+  };
+  const agentPills = agents.map((pill) => renderBadge(pill));
+  const alertPills = alerts.map((pill) => renderBadge(pill));
   const focus =
     style === "pill"
       ? focusText
@@ -855,10 +893,14 @@ export function buildTmuxAttentionPills(
   maxCount = 5,
   width?: number,
   style: TmuxBadgeStyle = "plain",
+  options: {
+    ordered?: boolean;
+  } = {},
 ): string | undefined {
   if (maxCount <= 0) return undefined;
   const layout = resolveStatuslineDetailLayout(width, maxCount);
-  const jumpItems = orderedAttentionItems(items)
+  const orderedItems = options.ordered ? items : orderedAttentionItems(items);
+  const jumpItems = orderedItems
     .filter(
       (item): item is AttentionItem & { kind: Exclude<AttentionKind, "unmatched"> } =>
         item.kind !== "unmatched" && item.kind !== "stalled",

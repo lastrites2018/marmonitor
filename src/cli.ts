@@ -37,6 +37,8 @@ import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { renderSummaryPopup } from "./summary-popup/render.js";
+import { parseSummaryPopupTarget } from "./summary-popup/shared.js";
 import { captureTmuxPaneOutput, resolveTmuxJumpTarget } from "./tmux/index.js";
 import { jumpBackForClient, jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
@@ -115,6 +117,7 @@ function buildHelpAppendix(): string {
     "  collector     Light snapshot collector lifecycle commands",
     "  clean         Review or kill unmatched leftovers",
     "  jump-back     Return to the first pre-jump tmux location for this client",
+    "  popup         Render a filtered tmux popup payload",
     "  debug-phase   Inspect raw phase signals for one PID",
     "  guard         Claude hook evaluator; fail-open on malformed input/errors",
     "  settings-*    Locate, inspect, or initialize settings.json",
@@ -296,7 +299,7 @@ function buildMinimalConfigSample(): string {
     {
       display: {
         attentionLimit: 10,
-        statuslineAttentionLimit: 8,
+        statuslineAttentionLimit: 7,
       },
       integration: {
         tmux: {
@@ -333,7 +336,7 @@ function buildAdvancedConfigSample(): string {
       },
       display: {
         attentionLimit: 10,
-        statuslineAttentionLimit: 8,
+        statuslineAttentionLimit: 7,
       },
       integration: {
         tmux: {
@@ -870,6 +873,37 @@ program
     }
 
     console.log(result.message ?? `Returned via ${result.level ?? "pane"}.`);
+  });
+
+program
+  .command("popup")
+  .description("Render a filtered popup payload for a summary target")
+  .requiredOption(
+    "--summary-target <target>",
+    "Summary target, e.g. agent:claude or phase:thinking",
+  )
+  .option("--config <path>", "Path to settings.json")
+  .action(async (opts) => {
+    const target = parseSummaryPopupTarget(opts.summaryTarget);
+    if (!target) {
+      console.error(`Invalid summary target: ${opts.summaryTarget}`);
+      process.exit(1);
+    }
+
+    const requestedConfigPath = resolveLoadedConfigPath(resolveConfigPath(opts));
+    const config = await loadConfig(requestedConfigPath);
+    const agents =
+      (await readHealthyCollectorSnapshotForRequest({
+        config,
+        requestedConfigPath,
+      })) ??
+      (await getAgentsSnapshot(config, {
+        enrichmentMode: "light",
+        includeStdoutHeuristic: true,
+        useSharedRuntimeSnapshots: true,
+      }));
+
+    console.log(renderSummaryPopup(agents, target));
   });
 
 program
