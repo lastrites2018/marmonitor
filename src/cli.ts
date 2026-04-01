@@ -35,6 +35,7 @@ import { detectClaudePhase } from "./scanner/claude.js";
 import { detectCodexPhase, indexCodexSessions, matchCodexSession } from "./scanner/codex.js";
 import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
+import { getProcessStartTime } from "./scanner/process.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
 import {
@@ -778,7 +779,10 @@ program
         includeTokenUsage: false,
         runtimePaths,
       });
-      const matched = matchCodexSession(agent.cwd, agent.startedAt, codexSessions);
+      const processStartedAt = await getProcessStartTime(agent.pid, {
+        sharedKey: `${agent.pid}:${agent.ppid ?? ""}:${agent.agentName}:${agent.cwd}`,
+      });
+      const matched = matchCodexSession(agent.cwd, processStartedAt, codexSessions);
       sessionPhase = await detectCodexPhase(matched?.filePath, config);
       sessionSourceFile = matched?.filePath;
     } else if (agent.agentName === "Claude Code" && agent.sessionId) {

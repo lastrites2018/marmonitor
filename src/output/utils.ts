@@ -173,10 +173,19 @@ export function determineStatus(
 export interface CodexSessionCandidate {
   cwd: string;
   timestamp: number;
+  lastActivityAt?: number;
+}
+
+const CODEX_SESSION_START_MATCH_MAX_SEC = 2 * 60 * 60;
+
+function codexSessionRecency(session: CodexSessionCandidate): number {
+  return session.lastActivityAt ?? session.timestamp;
 }
 
 /** Select the most plausible Codex session for a process.
- *  Prefer exact cwd match, then nearest timestamp; otherwise most recent. */
+ *  Prefer exact cwd match, then a plausibly close process-start timestamp.
+ *  When the process is long-lived and the start time is no longer useful,
+ *  fall back to the most recently active rollout instead. */
 export function selectCodexSession<T extends CodexSessionCandidate>(
   processCwd: string,
   processStartTime: number | undefined,
@@ -186,16 +195,31 @@ export function selectCodexSession<T extends CodexSessionCandidate>(
   if (cwdMatches.length === 0) return undefined;
   if (cwdMatches.length === 1) return cwdMatches[0];
 
-  const sorted = [...cwdMatches];
-  if (processStartTime !== undefined) {
-    sorted.sort(
-      (a, b) => Math.abs(a.timestamp - processStartTime) - Math.abs(b.timestamp - processStartTime),
-    );
-  } else {
-    sorted.sort((a, b) => b.timestamp - a.timestamp);
+  const byRecency = [...cwdMatches].sort((a, b) => {
+    const recencyDiff = codexSessionRecency(b) - codexSessionRecency(a);
+    if (recencyDiff !== 0) return recencyDiff;
+    return b.timestamp - a.timestamp;
+  });
+
+  if (processStartTime === undefined) {
+    return byRecency[0];
   }
 
-  return sorted[0];
+  const newestRecency = codexSessionRecency(byRecency[0]);
+  if (newestRecency - processStartTime > CODEX_SESSION_START_MATCH_MAX_SEC) {
+    return byRecency[0];
+  }
+
+  const byStartTime = [...cwdMatches].sort(
+    (a, b) => Math.abs(a.timestamp - processStartTime) - Math.abs(b.timestamp - processStartTime),
+  );
+  const closest = byStartTime[0];
+  const closestGap = Math.abs(closest.timestamp - processStartTime);
+  if (closestGap <= CODEX_SESSION_START_MATCH_MAX_SEC) {
+    return closest;
+  }
+
+  return byRecency[0];
 }
 
 /** Select unmatched processes that are eligible for cleanup. */
@@ -993,6 +1017,64 @@ function collapseStatuslineAttentionDuplicates(
     });
 }
 
+function compareImmediateDuplicateCandidates(a: AttentionItem, b: AttentionItem): number {
+  if (a.status !== b.status) {
+    if (a.status === "Active") return -1;
+    if (b.status === "Active") return 1;
+  }
+  const activityDiff = attentionActivityTime(b) - attentionActivityTime(a);
+  if (activityDiff !== 0) return activityDiff;
+  const agentDiff = a.agentName.localeCompare(b.agentName);
+  if (agentDiff !== 0) return agentDiff;
+  return a.pid - b.pid;
+}
+
+function collapseImmediateStatuslineDuplicates(
+  items: AttentionItem[],
+  maxLabelLength: number,
+): StatuslineAttentionRepresentative[] {
+  const grouped = new Map<string, AttentionItem[]>();
+  for (const item of items) {
+    const key = `${item.kind}:${statuslineRepoLabel(item.cwd)}`;
+    const existing = grouped.get(key) ?? [];
+    existing.push(item);
+    grouped.set(key, existing);
+  }
+
+  const kindOrder: Record<Exclude<AttentionKind, "active" | "unmatched" | "stalled">, number> = {
+    permission: 0,
+    thinking: 1,
+    tool: 2,
+  };
+
+  return [...grouped.values()]
+    .map((groupedItems) => {
+      const sorted = [...groupedItems].sort(compareImmediateDuplicateCandidates);
+      const representative = sorted[0];
+      const repoLabel = statuslineRepoLabel(representative.cwd);
+      const suffix = sorted.length > 1 ? ` +${sorted.length - 1}` : "";
+      return {
+        kind: representative.kind as Exclude<AttentionKind, "active" | "unmatched" | "stalled">,
+        pid: representative.pid,
+        agentName: representative.agentName,
+        cwd: representative.cwd,
+        label: truncateMiddle(`${repoLabel}${suffix}`, maxLabelLength),
+        lastAt: attentionActivityTime(representative),
+        collapsedCount: sorted.length - 1,
+        status: representative.status,
+        phase: representative.phase,
+        recentComplete: false,
+      } satisfies StatuslineAttentionRepresentative;
+    })
+    .sort((a, b) => {
+      const priorityDiff = kindOrder[a.kind] - kindOrder[b.kind];
+      if (priorityDiff !== 0) return priorityDiff;
+      const activityDiff = b.lastAt - a.lastAt;
+      if (activityDiff !== 0) return activityDiff;
+      return a.pid - b.pid;
+    });
+}
+
 export function buildStatuslineAttentionRepresentatives(
   items: AttentionItem[],
   maxCount = 5,
@@ -1005,22 +1087,12 @@ export function buildStatuslineAttentionRepresentatives(
     options.recentCompleteMaxAgeSec ?? DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC;
   const layout = resolveStatuslineDetailLayout(width, maxCount);
 
-  const immediate = orderedAttentionItems(
+  const immediate = collapseImmediateStatuslineDuplicates(
     items.filter(
       (item) => item.kind === "permission" || item.kind === "thinking" || item.kind === "tool",
     ),
-  ).map((item) => ({
-    kind: item.kind as Exclude<AttentionKind, "unmatched" | "stalled">,
-    pid: item.pid,
-    agentName: item.agentName,
-    cwd: item.cwd,
-    label: "",
-    lastAt: attentionActivityTime(item),
-    collapsedCount: 0,
-    status: item.status,
-    phase: item.phase,
-    recentComplete: false,
-  }));
+    layout.pathMaxLength,
+  );
 
   const recentComplete = collapseStatuslineAttentionDuplicates(
     items.filter((item) => isRecentCompleteAttention(item, nowSec, recentCompleteMaxAgeSec)),
@@ -1033,12 +1105,20 @@ export function buildStatuslineAttentionRepresentatives(
   const recentCompleteBudget = Math.max(0, layout.itemCount - selectedImmediate.length);
   const selectedRecentComplete = recentComplete.slice(0, recentCompleteBudget);
   let rawItems = [...selectedImmediate, ...selectedRecentComplete];
-  if (rawItems.length === 0) {
-    const fallbackItems = orderedAttentionItems(items)
-      .filter((item): item is AttentionItem & { kind: "active" } => item.kind === "active")
-      .slice(0, layout.itemCount);
-    const fallbackLabels = buildStatuslinePathLabels(fallbackItems, layout.pathMaxLength);
-    rawItems = fallbackItems.map((item, index) => ({
+  const selectedPids = new Set(rawItems.map((item) => item.pid));
+  const selectedRepoKeys = new Set(rawItems.map((item) => statuslineRepoLabel(item.cwd)));
+  const activeFallbackItems = orderedAttentionItems(items)
+    .filter(
+      (item): item is AttentionItem & { kind: "active" } =>
+        item.kind === "active" &&
+        !selectedPids.has(item.pid) &&
+        !selectedRepoKeys.has(statuslineRepoLabel(item.cwd)),
+    )
+    .slice(0, Math.max(0, layout.itemCount - rawItems.length));
+  const fallbackLabels = buildStatuslinePathLabels(activeFallbackItems, layout.pathMaxLength);
+  rawItems = [
+    ...rawItems,
+    ...activeFallbackItems.map((item, index) => ({
       kind: item.kind,
       pid: item.pid,
       agentName: item.agentName,
@@ -1049,8 +1129,8 @@ export function buildStatuslineAttentionRepresentatives(
       status: item.status,
       phase: item.phase,
       recentComplete: false,
-    }));
-  }
+    })),
+  ];
   if (rawItems.length === 0) return [];
 
   const unresolved = rawItems.filter((item) => item.kind !== "active");
@@ -1059,6 +1139,7 @@ export function buildStatuslineAttentionRepresentatives(
 
   return rawItems.map((item) => {
     if (item.kind === "active") return item;
+    if (item.label) return item;
     const label =
       pathLabels[pathIndex] ?? compactStatuslineDirLabel(item.cwd, layout.pathMaxLength);
     pathIndex += 1;

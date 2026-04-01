@@ -1,0 +1,71 @@
+Title: tmux statusline false empty-state bug
+Date: 2026-04-02
+Commit: 793037b fix: avoid false empty state in tmux statusline
+
+1. 증상
+
+- tmux statusline 왼쪽 rail에 실제 active session이 있는데도 `no active`처럼 비어 있는 상태로 보였다.
+- 오른쪽 rail도 실제 idle session이 있는데 `idle -`로 보여서, 마치 idle 자체가 없는 것처럼 읽혔다.
+- 사용자 입장에서는 "지금 대화 중인데 왜 thinking이나 active가 안 보이지?"처럼 보일 수 있었다.
+
+2. 실제 원인
+
+- 원본 snapshot이 비어 있었던 것이 아니라, statusline 전용 projection이 너무 공격적으로 비워졌다.
+- 왼쪽 rail은 `permission / recent thinking / recent tool / recent-complete`만 남기도록 압축하고 있었는데, 이 집합이 비면 곧바로 empty-state로 떨어졌다.
+- 문제는 그 시점에도 최근 active session은 여전히 존재할 수 있다는 점이다.
+- 즉, "즉시 주목 항목이 없음"과 "왼쪽 rail에 보여줄 것이 없음"을 같은 상태로 취급한 것이 버그였다.
+
+정리하면:
+
+- 원본 상태 문제 아님
+- collector 문제 아님
+- 렌더 단계의 statusline projection 문제였음
+
+3. 왜 오해를 만들었는가
+
+- 왼쪽 rail의 empty-state 라벨이 너무 강했다.
+- 오른쪽 rail의 `idle -`도 의미가 넓었다.
+- 실제 뜻은 "warm-idle이 없음"이었는데, 표시상으로는 "idle이 없음"처럼 읽혔다.
+- 그래서 사용자는 layout 문제나 collector stale 문제처럼 느낄 수 있었다.
+
+4. 수정 방식
+
+- 왼쪽 rail:
+  - `permission / recent thinking / recent tool / recent-complete`가 하나도 없을 때
+  - 최근 `active` session으로 fallback 하도록 변경했다.
+  - 즉, 진짜 아무것도 없을 때만 empty-state를 보여준다.
+
+- 오른쪽 rail:
+  - `idle`이라는 넓은 표현 대신 `warm`으로 라벨을 좁혔다.
+  - `idle -` 대신 `warm -`를 표시한다.
+  - 뜻은 "표시 가능한 warm-idle이 없음"이다.
+
+5. 재발 방지 테스트
+
+이번 수정은 테스트로 고정되어 있다.
+
+- tests/utils.test.mjs
+  - `shows no focus when no attention items exist`
+  - `shows no focus when only unmatched/stalled items exist`
+  - `statusline attention projection`
+  - `falls back to the most recent active sessions when no immediate or recent-complete items exist`
+
+- tests/output.test.mjs
+  - wide tmux-badges에서 `warm Cl1 Cx1` rail이 렌더되는지 확인
+  - warm-idle 후보가 없을 때 `warm -`가 표시되는지 확인
+
+- tests/statusline-client.test.mjs
+  - 오른쪽 rail이 `warm ...` 라벨과 함께 jump-back indicator와 정상 결합되는지 확인
+
+6. 재발 방지 기준
+
+- "즉시 주목 항목이 없다"와 "왼쪽 rail 전체가 비어야 한다"를 같은 뜻으로 취급하면 안 된다.
+- statusline projection은 raw attention보다 더 보수적으로 줄일 수 있지만, 원본에 active session이 있는데 false empty-state를 만들면 안 된다.
+- right rail의 empty-state도 범주 이름을 정확히 반영해야 한다.
+  - idle 전체가 아니라 warm-idle empty-state임
+
+7. 남은 별도 문제
+
+- 현재 세션이 왜 `🤔`가 아니라 `✓` 또는 일반 active로 보이는지는 별도 이슈다.
+- 이건 false empty-state 버그가 아니라 phase 분류 / recentness semantics 문제다.
+- 따라서 이번 수정은 "왼쪽이 비어 보이는 버그"만 다뤘고, phase 해석은 별도 축으로 유지한다.

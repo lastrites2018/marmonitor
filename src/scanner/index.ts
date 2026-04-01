@@ -232,18 +232,19 @@ export async function scanAgents(
         cachedEnrichment?.cwd ?? seededSession?.cwd ?? (await getProcessCwd(proc.pid)) ?? "unknown";
       const cwdMatches = codexSessionsByCwd?.get(cwd) ?? [];
       let matched: CodexSessionMeta | undefined;
-      if (seededSession?.sessionId) {
+      if (seededSession?.sessionId && cwdMatches.length <= 1) {
         matched = cwdMatches.find((session) => session.id === seededSession.sessionId);
       }
       if (!matched && cwdMatches.length === 1) {
         matched = cwdMatches[0];
       } else if (!matched && cwdMatches.length > 1) {
-        const processStartTime =
-          seededSession?.startedAt ??
-          (await getProcessStartTime(proc.pid, {
-            sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
-          }));
+        const processStartTime = await getProcessStartTime(proc.pid, {
+          sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
+        });
         matched = selectCodexSession(cwd, processStartTime, cwdMatches);
+        if (!matched && seededSession?.sessionId) {
+          matched = cwdMatches.find((session) => session.id === seededSession.sessionId);
+        }
       }
       if (matched) {
         sessionMatched = true;

@@ -478,6 +478,36 @@ describe("selectCodexSession", () => {
   it("falls back to the most recent session when process start time is missing", () => {
     assert.deepEqual(selectCodexSession("/repo", undefined, sameCwdSessions), sameCwdSessions[2]);
   });
+
+  it("falls back to the most recently active rollout when process start time is too old to disambiguate", () => {
+    const longLivedSessions = [
+      { cwd: "/repo", timestamp: 1000, lastActivityAt: 8000, id: "older-active" },
+      { cwd: "/repo", timestamp: 1500, lastActivityAt: 12000, id: "current" },
+      { cwd: "/repo", timestamp: 2200, lastActivityAt: 6000, id: "stale" },
+    ];
+
+    assert.deepEqual(selectCodexSession("/repo", 40_000, longLivedSessions), longLivedSessions[1]);
+  });
+
+  it("still prefers the closest timestamp when process start time is plausibly close", () => {
+    const mixedSessions = [
+      { cwd: "/repo", timestamp: 1_000, lastActivityAt: 10_000, id: "old-hot" },
+      { cwd: "/repo", timestamp: 3_500, lastActivityAt: 8_000, id: "matching" },
+      { cwd: "/repo", timestamp: 9_000, lastActivityAt: 12_000, id: "new-hot" },
+    ];
+
+    assert.deepEqual(selectCodexSession("/repo", 5_000, mixedSessions), mixedSessions[1]);
+  });
+
+  it("ignores a close old timestamp when newer rollout activity shows the process has long since moved on", () => {
+    const sessions = [
+      { cwd: "/repo", timestamp: 1_000, lastActivityAt: 1_200, id: "old-close" },
+      { cwd: "/repo", timestamp: 8_000, lastActivityAt: 20_000, id: "current-hot" },
+      { cwd: "/repo", timestamp: 9_500, lastActivityAt: 15_000, id: "older-hot" },
+    ];
+
+    assert.deepEqual(selectCodexSession("/repo", 1_050, sessions), sessions[1]);
+  });
 });
 
 describe("selectUnmatchedTargets", () => {
@@ -1383,6 +1413,7 @@ describe("statusline attention projection", () => {
         ["thinking", 11],
         ["tool", 12],
         ["active", 13],
+        ["active", 15],
       ],
     );
   });
@@ -1506,6 +1537,140 @@ describe("statusline attention projection", () => {
     );
   });
 
+  it("backfills remaining left-rail slots with recent active sessions", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "permission",
+          priority: 0,
+          pid: 70,
+          agentName: "Claude Code",
+          cwd: "/repo/allow",
+          status: "Active",
+          phase: "permission",
+          lastActivityAt: now - 5,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 71,
+          agentName: "Codex",
+          cwd: "/repo/think-a",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 10,
+        },
+        {
+          kind: "tool",
+          priority: 1,
+          pid: 72,
+          agentName: "Claude Code",
+          cwd: "/repo/tool-a",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 14,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 73,
+          agentName: "Codex",
+          cwd: "/repo/current-session",
+          status: "Active",
+          phase: "done",
+          lastActivityAt: now - 20,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 74,
+          agentName: "Claude Code",
+          cwd: "/repo/second-session",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 30,
+          idleSince: now - 30,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid, item.label]),
+      [
+        ["permission", 70, "allow"],
+        ["thinking", 71, "think-a"],
+        ["tool", 72, "tool-a"],
+        ["active", 73, "current-session"],
+        ["active", 74, "second-session"],
+      ],
+    );
+  });
+
+  it("collapses duplicate immediate items by repo and prefers the active representative", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 80,
+          agentName: "Codex",
+          cwd: "/repo/shared",
+          status: "Idle",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+          idleSince: now - 5,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 81,
+          agentName: "Codex",
+          cwd: "/repo/shared",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 82,
+          agentName: "Codex",
+          cwd: "/repo/other",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 9,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 83,
+          agentName: "Claude Code",
+          cwd: "/repo/fallback",
+          status: "Active",
+          phase: "done",
+          lastActivityAt: now - 15,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid, item.label, item.collapsedCount]),
+      [
+        ["thinking", 81, "shared +1", 1],
+        ["thinking", 82, "other", 0],
+        ["active", 83, "fallback", 0],
+      ],
+    );
+  });
+
   it("falls back to the most recent active sessions when no immediate or recent-complete items exist", () => {
     const now = Math.floor(Date.now() / 1000);
     const representatives = buildStatuslineAttentionRepresentatives(
@@ -1624,7 +1789,10 @@ describe("statusline attention projection", () => {
 
     assert.deepEqual(
       representatives.map((item) => [item.pid, item.recentComplete]),
-      [[51, true]],
+      [
+        [51, true],
+        [50, false],
+      ],
     );
     assert.equal(
       buildStatuslineAttentionFocusText(
@@ -1655,7 +1823,7 @@ describe("statusline attention projection", () => {
         200,
         { nowSec: now },
       ),
-      "✅Cx recent-complete 20s",
+      "✅Cx recent-complete 20s │ ✓Cl done-only 40s",
     );
     assert.equal(
       buildAttentionFocusText(
