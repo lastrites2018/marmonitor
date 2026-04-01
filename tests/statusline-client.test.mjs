@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, unlink } from "node:fs/promises";
+import { mkdtemp, unlink, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   collectorSnapshotFile,
+  collectorStatuslineFile,
   readCollectorStatusline,
   writeCollectorHealth,
   writeCollectorSnapshot,
@@ -204,5 +205,60 @@ describe("statusline client", () => {
     );
 
     assert.equal(second.stdout.trim(), first.stdout.trim());
+  });
+
+  it("rebuilds a stale width-specific collector statusline from the current snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-width-refresh-"));
+    await writeCollectorStatusline("tmux-badges", 5, 214, "AI:0", root);
+    const now = Date.now();
+    const staleSec = (now - 60_000) / 1000;
+    await utimes(collectorStatuslineFile("tmux-badges", 5, 214, root), staleSec, staleSec);
+    await writeCollectorHealth(
+      {
+        pid: 5555,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorSnapshot(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/repo",
+          status: "Idle",
+          runtimeSource: "cli",
+        },
+      ],
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [statuslineBinPath, "--statusline", "--statusline-format", "tmux-badges", "--width", "214"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.notEqual(stdout.trim(), "AI:0");
+    const widthStatusline = await readCollectorStatusline("tmux-badges", 5, 214, 10_000, root);
+    assert.equal(widthStatusline?.value, stdout.trim());
   });
 });

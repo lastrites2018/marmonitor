@@ -2,11 +2,13 @@ import type { AgentSession } from "../types.js";
 
 export const STATUSLINE_STALE_FALLBACK_MS = 60_000;
 export const COLLECTOR_HEALTH_STALE_FALLBACK_MS = 15_000;
+export const COLLECTOR_ARTIFACT_MTIME_SKEW_MS = 2_000;
 
 export type CachedArtifact<T> = {
   value: T;
   ageMs: number;
   fresh: boolean;
+  mtimeMs?: number;
 };
 
 export type CollectorState = "starting" | "refreshing" | "idle" | "degraded";
@@ -93,6 +95,15 @@ export function matchesCollectorConfigPath(
 ): boolean {
   if (!health) return false;
   return (health.configPath ?? undefined) === requestedConfigPath;
+}
+
+export function isCollectorArtifactCurrent(
+  artifact: CachedArtifact<unknown> | undefined,
+  health: CollectorHealth | undefined,
+): boolean {
+  if (!artifact || !health?.snapshotGeneratedAt) return false;
+  if (!Number.isFinite(artifact.mtimeMs)) return false;
+  return Number(artifact.mtimeMs) + COLLECTOR_ARTIFACT_MTIME_SKEW_MS >= health.snapshotGeneratedAt;
 }
 
 export function decideStatuslineServe(params: {

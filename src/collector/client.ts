@@ -6,6 +6,7 @@ import type { AgentSession } from "../types.js";
 import { resolveCliEntrypoint } from "./entrypoints.js";
 import {
   collectorHealthMaxAgeMs,
+  isCollectorArtifactCurrent,
   isCollectorHealthy,
   isCollectorHealthyForStatusline,
   matchesCollectorConfigPath,
@@ -74,6 +75,9 @@ export async function readHealthyCollectorStatusline(params: {
     Number.MAX_SAFE_INTEGER,
     params.root,
   );
+  if (!isCollectorArtifactCurrent(statusline, health?.value)) {
+    return undefined;
+  }
   return statusline?.value;
 }
 
@@ -103,6 +107,9 @@ export async function readCurrentCollectorStatusline(params: {
     Number.MAX_SAFE_INTEGER,
     params.root,
   );
+  if (!isCollectorArtifactCurrent(statusline, health?.value)) {
+    return undefined;
+  }
   return statusline?.value;
 }
 

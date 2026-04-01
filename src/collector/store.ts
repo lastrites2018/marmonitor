@@ -63,6 +63,7 @@ export async function readCachedStatuslineEntry(
       value: cached.value,
       ageMs: cached.ageMs,
       fresh: cached.fresh,
+      mtimeMs: cached.mtimeMs,
     };
   });
 }
@@ -106,6 +107,7 @@ export async function readCachedSnapshotEntry(
       value: cached.value,
       ageMs: cached.ageMs,
       fresh: cached.fresh,
+      mtimeMs: cached.mtimeMs,
     };
   });
 }
@@ -141,6 +143,7 @@ export async function readCollectorHealth(
       value: cached.value,
       ageMs: cached.ageMs,
       fresh: cached.fresh,
+      mtimeMs: cached.mtimeMs,
     };
   });
 }
@@ -178,6 +181,7 @@ export async function readCollectorSnapshot(
       value: cached.value,
       ageMs: cached.ageMs,
       fresh: cached.fresh,
+      mtimeMs: cached.mtimeMs,
     };
   });
 }
@@ -210,6 +214,7 @@ export async function readCollectorStatusline(
       value: cached.value,
       ageMs: cached.ageMs,
       fresh: cached.fresh,
+      mtimeMs: cached.mtimeMs,
     };
   });
 }

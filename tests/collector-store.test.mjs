@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, stat, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -158,7 +158,7 @@ describe("collector store", () => {
         startedAt: now,
         lastTickAt: now,
         lastSuccessAt: now,
-        snapshotGeneratedAt: now,
+        snapshotGeneratedAt: now - 1_000,
         state: "idle",
         version: "test",
         snapshotTtlMs: getDefaults().performance.snapshotTtlMs,
@@ -187,7 +187,7 @@ describe("collector store", () => {
         startedAt: now,
         lastTickAt: now,
         lastSuccessAt: now,
-        snapshotGeneratedAt: now,
+        snapshotGeneratedAt: now - 1_000,
         state: "idle",
         version: "test",
         configPath: "/tmp/settings.json",
@@ -205,6 +205,38 @@ describe("collector store", () => {
       root,
     });
     assert.equal(statusline, "AI7 | 10%");
+  });
+
+  it("does not reuse a stale collector statusline older than the latest snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-collector-stale-statusline-"));
+    await writeCollectorStatusline("tmux-badges", 5, 214, "AI:0", root);
+    const now = Date.now();
+    const staleSec = (now - 60_000) / 1000;
+    await utimes(collectorStatuslineFile("tmux-badges", 5, 214, root), staleSec, staleSec);
+    await writeCollectorHealth(
+      {
+        pid: 1003,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: "/tmp/settings.json",
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+
+    const statusline = await readCurrentCollectorStatusline({
+      requestedConfigPath: "/tmp/settings.json",
+      format: "tmux-badges",
+      width: 214,
+      root,
+    });
+    assert.equal(statusline, undefined);
   });
 
   it("does not reuse collector snapshot artifacts when config paths do not match", async () => {
