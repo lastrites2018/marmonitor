@@ -1,0 +1,447 @@
+idle right rail 계획
+
+진행 상태
+- 2026-04-01: 1차 구현 완료
+  - `tmux-badges` 포맷에 idle right rail 추가
+  - 데이터 소스는 기존 `AgentSession[]`만 재사용
+  - Claude/Codex의 진짜 `Idle` 세션만 포함
+  - 폭이 부족하면 `full -> compact -> minimal -> hidden` 순서로 후퇴
+  - left content는 절대 줄이지 않고, right rail만 생략
+  - 회귀 테스트 추가
+
+목적
+- 하단 statusline의 기존 왼쪽 정보와 별개로, 오른쪽 정렬 영역에 "현재 켜져 있지만 아무 작업도 진행 중이지 않은 Claude/Codex 세션"을 모아서 보여준다.
+- 이 정보는 "지금 중요한 세션"이 아니라 "지금 다시 투입 가능한 세션"을 빠르게 파악하기 위한 운영 정보다.
+- 기존 attention / thinking / tool / permission 기능은 유지하고, 별도의 정보 축으로 추가한다.
+
+배경 판단
+- 동시 작업 세션이 많을수록 "누가 지금 한가한가"가 실제로 더 유용할 수 있다.
+- thinking/tool/permission은 현재 진행 상황을 보여주지만, idle 세션 목록은 재투입 가능한 작업 슬롯을 보여준다.
+- 따라서 이 기능은 시각적 장식이 아니라 운영 효율을 높이는 기능으로 볼 수 있다.
+
+핵심 원칙
+- 왼쪽 영역: 지금 중요하고 바로 대응해야 하는 정보
+- 오른쪽 영역: 지금 놀고 있는 세션, 즉 spare capacity 정보
+- 새 스캔 금지
+- collector light snapshot만 재사용
+- 오른쪽은 보조 정보이므로 시각적으로 더 약하게 유지
+
+현재 코드 기준 삽입 지점
+- statusline 최종 조합은 `src/output/index.ts`의 `renderStatusline()`이 담당한다.
+- `tmux-badges` 포맷의 summary/attention 문자열 생성은 `src/output/utils.ts`가 담당한다.
+- 1차 구현은 아래 경계로 두는 것이 가장 단순하다.
+  - `src/output/utils.ts`
+    - idle 세션 선택
+    - idle right rail 문자열 생성
+    - visible width 계산용 순수 유틸
+  - `src/output/index.ts`
+    - 기존 left content와 idle right rail을 최종 결합
+- collector는 그대로 `AgentSession[]`만 제공하고, idle rail은 렌더 단계의 순수 파생값으로 둔다.
+
+1. UX 설계
+
+목표
+- 사용자가 "지금 다시 써도 되는 세션"을 한눈에 본다.
+- 왼쪽 attention 흐름과 역할이 충돌하지 않게 한다.
+
+권장 배치
+- 기존 하단 statusline의 왼쪽:
+  - agent count
+  - waiting / warning / thinking / tool
+  - top attention items
+- 새 하단 statusline의 오른쪽:
+  - idle Claude/Codex 세션 요약
+
+권장 의미
+- 왼쪽은 action-now
+- 오른쪽은 reuse-now
+
+권장 톤
+- 오른쪽은 저강도 표현
+- 강조 색 최소화
+- 아이콘 최소화
+- 회색/무채색 위주 또는 plain text
+
+권장 라벨
+- `idle`
+- `free`
+- `standby`
+
+가장 추천하는 기본 라벨
+- `idle`
+
+추천 표기 예시
+- `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
+- 더 압축:
+  - `idle Cl2 Cx3`
+- 아주 좁은 폭:
+  - `idle 5`
+
+추천 기본 문구 확정
+- prefix는 `idle`
+- count summary는 agent별 count를 우선
+- 이름은 최근 idle 세션의 repo/folder명만
+- 구분자는 ` · `
+- count와 이름 구분은 ` | `
+
+최종 권장 1차 문자열
+- full:
+  - `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
+- compact:
+  - `idle Cl2 Cx3`
+- minimal:
+  - `idle 5`
+
+인터랙션
+- 1차는 read-only
+- 오른쪽 idle 영역은 클릭 기능 없이 시작하는 것이 맞다.
+- 이유:
+  - 현재 핵심 가치는 "가용 슬롯 파악"이지 "상호작용 추가"가 아니다.
+  - clickable surface를 늘리면 사용자가 상태줄 semantics를 더 배워야 한다.
+
+비목표
+- idle 영역에서 바로 jump
+- idle 영역 popup
+- idle 영역에서 세션 kill/reuse action 제공
+- 첫 단계에서 Gemini 포함
+
+수용 기준
+- 왼쪽 attention 흐름을 방해하지 않는다.
+- 오른쪽만 봐도 "지금 쉬고 있는 Claude/Codex 세션이 몇 개인지, 누구인지" 파악 가능하다.
+- statusline이 다시 과하게 복잡해지지 않는다.
+
+명시적 비수용 사례
+- 오른쪽 rail 때문에 왼쪽 attention 항목이 줄어드는 경우
+- idle rail이 summary badge보다 더 눈에 띄는 경우
+- thinking/tool 세션이 idle로 보이는 경우
+
+2. idle 정의
+
+핵심 원칙
+- "진짜 대기 중"인 세션만 포함해야 한다.
+- 단순히 CPU가 낮다고 idle로 보면 안 된다.
+
+1차 포함 조건
+- `agentName`이 `Claude Code` 또는 `Codex`
+- `status === "Idle"`
+- `phase !== "permission"`
+- `phase !== "thinking"`
+- `phase !== "tool"`
+- `status !== "Stalled"`
+- `status !== "Unmatched"`
+- `status !== "Dead"`
+
+1차 제외 조건
+- permission 대기
+- thinking
+- tool
+- stalled
+- unmatched
+- dead
+- Gemini
+
+왜 이렇게 정의하나
+- permission/thinking/tool은 사실상 진행 중이다.
+- stalled/unmatched/dead는 "다시 쓸 수 있는 대기 슬롯"이 아니다.
+- Gemini는 현재 운영 대상에서 제외해 정보 밀도를 줄인다.
+
+정렬 기준
+- 가장 최근 활동이 있었던 idle 세션 먼저
+- tie-breaker는 agent name, 그다음 pid
+
+추천 정렬 함수
+1. `lastActivityAt` desc
+2. `lastResponseAt` desc
+3. `startedAt` desc
+4. `agentName` asc
+5. `pid` asc
+
+같은 repo 중복 처리
+- 1차는 세션 단위 그대로 유지
+- 다만 표시명은 repo/folder명만 사용
+- 같은 이름이 서로 다른 cwd를 가리킬 때만 부모 경로를 붙인다.
+
+권장 데이터 모델
+- 내부 순수 모델은 아래 정도면 충분하다.
+
+```ts
+type IdleRightRailEntry = {
+  pid: number;
+  agent: "claude" | "codex";
+  cwd: string;
+  label: string;
+  lastAt: number;
+};
+
+type IdleRightRailSnapshot = {
+  total: number;
+  claudeCount: number;
+  codexCount: number;
+  entries: IdleRightRailEntry[];
+};
+```
+
+의미
+- `entries`는 이미 정렬된 idle 세션 목록
+- `label`은 오른쪽 rail에 직접 들어갈 short name
+- `lastAt`은 정렬용 숫자
+
+권장 함수 시그니처
+
+```ts
+function isIdleRightRailCandidate(agent: AgentSession): boolean;
+function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRightRailSnapshot;
+```
+
+추후 확장 후보
+- "idle but recently active"와 "long-idle" 구분
+- 일정 시간 이상 놀고 있는 세션을 뒤로 밀기
+- Gemini optional inclusion
+
+수용 기준
+- 오른쪽 idle 목록에는 사용자가 "지금 쓸 수 있다"고 받아들일 만한 세션만 들어간다.
+- thinking/tool 세션이 실수로 idle 영역에 섞이지 않는다.
+
+3. 렌더 규칙
+
+핵심 원칙
+- 오른쪽 영역은 짧고 조용해야 한다.
+- 폭이 좁아지면 자연스럽게 count-only로 후퇴해야 한다.
+
+구성
+- prefix
+  - `idle`
+- count summary
+  - `Cl2`
+  - `Cx3`
+- optional names
+  - repo/folder 이름 최대 3개
+
+권장 기본 포맷
+- `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
+
+구체적 렌더 단계
+1. `IdleRightRailSnapshot` 생성
+2. count 문자열 생성
+   - `Cl2`
+   - `Cx3`
+3. 이름 문자열 생성
+   - 최대 3개
+   - `label1 · label2 · label3`
+4. width budget에 따라 세 가지 variant 생성
+   - full
+   - compact
+   - minimal
+5. 현재 left content의 visible width를 계산
+6. `width - leftWidth`에 들어가는 가장 긴 right variant를 선택
+7. 아무 variant도 안 들어가면 right rail을 생략
+
+variant 예시
+- full
+  - `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
+- compact
+  - `idle Cl2 Cx3`
+- minimal
+  - `idle 5`
+- hidden
+  - `""`
+
+fallback 포맷
+- idle 세션이 0개일 때:
+  - 아무것도 표시하지 않음
+  - 또는 매우 짧게 `idle 0` 대신 비표시를 권장
+
+권장 비표시 규칙
+- idle 세션이 없으면 오른쪽 rail 전체를 숨긴다.
+- 이유:
+  - 의미 없는 상태를 계속 표시하면 noise가 된다.
+
+폭별 렌더링 규칙
+- width < 90
+  - 오른쪽 idle rail 비표시
+- width < 120
+  - `idle Cl2 Cx3`
+- width < 160
+  - `idle Cl2 Cx3 | marmonitor · roam-new`
+- width >= 160
+  - `idle Cl2 Cx3 | marmonitor · roam-new · fmbattle`
+
+이름 선택 규칙
+- 최대 3개
+- 정렬 기준 상위 세션부터 선택
+- 표시명은 repo/folder명
+- 중복 이름이 서로 다른 cwd면 부모 경로 포함
+
+visible width 계산 규칙
+- tmux markup은 width 계산에서 제외해야 한다.
+- 1차 구현은 idle rail을 plain text로 유지하므로, right rail 자체의 width 계산은 단순 문자열 길이로 충분하다.
+- 문제는 left content가 tmux markup을 포함한다는 점이다.
+- 따라서 최소한 아래 유틸이 필요하다.
+
+```ts
+function stripTmuxFormatting(text: string): string;
+function visibleTextWidth(text: string): number;
+```
+
+권장 구현
+- `#[...]` 구간 제거
+- 나머지 plain text 길이 사용
+- 1차에서는 East Asian width까지 과하게 계산하지 말고 단순 길이로 시작
+- 이모지 폭 오차는 후속 보정 대상으로 둔다
+
+시각 스타일
+- plain text 우선
+- 클릭 range 없음
+- pill/minimal styling과 별도로 idle rail은 plain 유지 권장
+
+좌우 결합 원칙
+- 왼쪽 attention/statusline 본문과는 문자열 레벨에서 독립적으로 생성
+- 마지막 결합 시 width를 보고 오른쪽 rail이 들어갈 수 있을 때만 붙인다.
+
+권장 결합 형태
+- 현재 single-command statusline 구조에서는 renderer가 직접 spacing을 계산하는 것이 1차로 가장 안전하다.
+- 즉:
+  - `left content`
+  - `spaces`
+  - `right rail`
+  순서로 조합한다.
+
+권장 결합 알고리즘
+
+```ts
+const leftWidth = visibleTextWidth(left);
+const rightWidth = visibleTextWidth(right);
+const gap = 2;
+const spaceBudget = width - leftWidth - rightWidth;
+
+if (spaceBudget >= gap) {
+  return `${left}${" ".repeat(spaceBudget)}${right}`;
+}
+
+return left;
+```
+
+주의
+- left 우선, right 포기 원칙을 절대 뒤집지 않는다.
+- right rail이 들어가지 않으면 그냥 생략한다.
+
+비권장
+- 오른쪽 idle rail 때문에 왼쪽 attention 항목이 잘리는 것
+- idle rail을 위해 summary badge 숫자를 줄이는 것
+
+수용 기준
+- 폭이 좁아질수록 오른쪽 rail이 먼저 줄거나 사라진다.
+- 왼쪽 attention 정보는 우선 보호된다.
+
+4. 성능 제약
+
+핵심 원칙
+- idle right rail 때문에 새 스캔을 돌리면 안 된다.
+- 기존 collector 구조를 그대로 재사용해야 한다.
+
+허용되는 데이터 소스
+- collector light snapshot
+- 이미 메모리/파일에 있는 statusline render 입력 데이터
+
+금지되는 작업
+- `scanAgents()` 추가 호출
+- `getAgentsSnapshot()` 추가 호출
+- `tmux capture`
+- `stdout heuristic`
+- `pidusage`
+- `lsof`
+- `getSystemInfo()` 추가 호출
+
+권장 구현 방식
+- 현재 statusline render 시점에 이미 가진 `agents` 배열에서 파생 계산
+- 즉:
+  - 왼쪽 summary 생성
+  - attention items 생성
+  - idle rail 생성
+  - 마지막에 문자열 결합
+
+권장 분리
+- 순수 함수:
+  - `selectIdleSessionsForRightRail(agents)`
+  - `buildIdleRightRail(snapshot, width)`
+  - `chooseIdleRightRailVariant(snapshot, availableWidth)`
+  - `joinLeftAndRightRail(left, right, width)`
+- side effect 없음
+
+복잡도 목표
+- 현재 render 비용에 O(n) 필터 하나 정도만 추가
+- 세션 수가 늘어나도 scan cost는 변하지 않아야 한다.
+
+성능 수용 기준
+- collector healthy 경로에서 foreground cost가 의미 있게 늘지 않는다.
+- 기존 statusline benchmark와 비교해도 idle rail 추가로 큰 회귀가 없어야 한다.
+- 특히 current hot path가 여전히 file-read + render 수준에 머물러야 한다.
+
+검증 기준
+- idle rail on/off 비교 benchmark
+- width가 좁을 때 idle rail이 바로 사라지는지 확인
+- 많은 idle 세션이 있어도 names max count가 지켜지는지 확인
+- thinking/tool 세션이 idle rail에 섞이지 않는지 테스트
+
+구체 테스트 케이스
+
+단위 테스트
+- `isIdleRightRailCandidate`
+  - Claude/Codex Idle -> true
+  - Gemini Idle -> false
+  - thinking/tool/permission -> false
+  - Stalled/Unmatched/Dead -> false
+
+- `selectIdleSessionsForRightRail`
+  - count 집계 정확성
+  - 최근 활동 기준 정렬
+  - 동일 repo명 충돌 시 부모 경로 포함
+
+- `chooseIdleRightRailVariant`
+  - full / compact / minimal / hidden 선택
+  - 이름 최대 3개 유지
+
+- `joinLeftAndRightRail`
+  - 충분한 폭이면 right rail 부착
+  - 부족한 폭이면 compact/minimal로 후퇴
+  - 더 부족하면 숨김
+
+snapshot/render 회귀 테스트
+- 기존 tmux-badges 출력에서 left summary가 변하지 않는지
+- idle rail이 있을 때만 오른쪽 문자열이 붙는지
+- idle 세션이 0일 때 기존 출력과 동일한지
+
+benchmark 확인 항목
+- collector healthy 경로에서 idle rail on/off 비교
+- warm/stale/forced-miss 수치가 크게 악화되지 않는지
+
+추천 구현 순서
+1. 순수 idle selection 함수 추가
+2. right rail summary/count 포맷 추가
+3. width-aware truncation 규칙 추가
+4. statusline 결합 규칙 추가
+5. benchmark / regression test 추가
+
+롤아웃 순서
+1. selection/model 함수 추가
+2. plain right rail 문자열 생성
+3. width-aware variant 선택
+4. left/right join 적용
+5. 테스트 보강
+6. 실제 tmux width 90/120/160대에서 확인
+7. 필요하면 label/threshold 미세 조정
+
+비범위 명시
+- idle rail 클릭
+- idle rail popup
+- idle 세션 재사용/전환 action
+- right rail 전용 color/pill style
+- idle rail을 별도 collector artifact로 저장
+
+메타 결론
+- 이 기능은 "무엇이 중요한가"를 더 강조하는 기능이 아니라, "지금 다시 투입 가능한 슬롯이 누구인가"를 보여주는 운영 보조 기능이다.
+- 따라서 attention 영역과 분리된 오른쪽 rail로 두는 것이 타당하다.
+- 성공 조건은 세 가지다.
+  - 진짜 idle만 보여줄 것
+  - 왼쪽 attention보다 덜 튈 것
+  - 새 스캔 없이 collector snapshot 파생만 사용할 것

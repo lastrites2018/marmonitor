@@ -15,6 +15,7 @@ import {
   type TmuxBadgeStyle,
   buildAttentionFocusText,
   buildAttentionItems,
+  buildIdleRightRail,
   buildJumpAttentionItems,
   buildStatuslineSummary,
   buildTmuxAttentionPills,
@@ -22,8 +23,11 @@ import {
   compactDirLabel,
   formatElapsed,
   formatTokens,
+  joinLeftAndRightRail,
+  selectIdleSessionsForRightRail,
   serializeWeztermPills,
   shortenPath,
+  visibleTextWidth,
 } from "./utils.js";
 
 export interface StatuslineRenderOptions {
@@ -558,7 +562,13 @@ export async function renderStatusline(
       const focusText = buildTmuxAttentionPills(jumpItems, attentionLimit, width, style, {
         ordered: true,
       });
-      return buildTmuxBadgeBar(snapshot, focusText, style);
+      const left = buildTmuxBadgeBar(snapshot, focusText, style);
+      const right = buildIdleRightRail(
+        selectIdleSessionsForRightRail(agents),
+        width,
+        width && width > 0 ? Math.max(0, width - visibleTextWidth(left) - 2) : 0,
+      );
+      return joinLeftAndRightRail(left, right, width);
     }
 
     if (format === "wezterm-pills") {

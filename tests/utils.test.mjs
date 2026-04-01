@@ -4,6 +4,7 @@ import {
   advanceJsonlCursor,
   buildAttentionFocusText,
   buildAttentionItems,
+  buildIdleRightRail,
   buildJumpAttentionItems,
   buildStatusPills,
   buildStatuslineSummary,
@@ -17,11 +18,14 @@ import {
   formatElapsed,
   formatElapsedCompact,
   formatTokens,
+  isIdleRightRailCandidate,
+  joinLeftAndRightRail,
   resolvePhaseFromHistory,
   resolvePhaseWithDecay,
   resolveSessionRegistryPath,
   selectAttentionItem,
   selectCodexSession,
+  selectIdleSessionsForRightRail,
   selectJumpAttentionItem,
   selectRecentSessionFile,
   selectUnmatchedTargets,
@@ -29,6 +33,7 @@ import {
   shortenPath,
   updatePhaseHistory,
   upsertSessionRegistryEntry,
+  visibleTextWidth,
 } from "../dist/output/utils.js";
 
 describe("shortenPath", () => {
@@ -1275,5 +1280,131 @@ describe("buildAttentionItems", () => {
     assert.match(text, /⏳Cl mjjo allow/);
     assert.doesNotMatch(text, /🤔Cl/);
     assert.doesNotMatch(text, /\b•Cx\b/);
+  });
+});
+
+describe("idle right rail", () => {
+  it("accepts only reusable Claude/Codex idle sessions", () => {
+    assert.equal(
+      isIdleRightRailCandidate({
+        pid: 10,
+        agentName: "Claude Code",
+        cwd: "/repo/a",
+        status: "Idle",
+      }),
+      true,
+    );
+    assert.equal(
+      isIdleRightRailCandidate({
+        pid: 11,
+        agentName: "Codex",
+        cwd: "/repo/b",
+        status: "Idle",
+      }),
+      true,
+    );
+    assert.equal(
+      isIdleRightRailCandidate({
+        pid: 12,
+        agentName: "Gemini",
+        cwd: "/repo/c",
+        status: "Idle",
+      }),
+      false,
+    );
+    assert.equal(
+      isIdleRightRailCandidate({
+        pid: 13,
+        agentName: "Claude Code",
+        cwd: "/repo/d",
+        status: "Idle",
+        phase: "thinking",
+      }),
+      false,
+    );
+    assert.equal(
+      isIdleRightRailCandidate({
+        pid: 14,
+        agentName: "Codex",
+        cwd: "/repo/e",
+        status: "Stalled",
+      }),
+      false,
+    );
+  });
+
+  it("selects and sorts idle sessions with disambiguated labels", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const snapshot = selectIdleSessionsForRightRail([
+      {
+        pid: 30,
+        agentName: "Codex",
+        cwd: "/Users/macrent/work/marmonitor",
+        status: "Idle",
+        lastActivityAt: now - 30,
+      },
+      {
+        pid: 31,
+        agentName: "Claude Code",
+        cwd: "/Users/macrent/side/marmonitor",
+        status: "Idle",
+        lastActivityAt: now - 10,
+      },
+      {
+        pid: 32,
+        agentName: "Codex",
+        cwd: "/Users/macrent/work/roam-new",
+        status: "Idle",
+        lastActivityAt: now - 20,
+      },
+      {
+        pid: 33,
+        agentName: "Claude Code",
+        cwd: "/Users/macrent/work/fmbattle",
+        status: "Active",
+        phase: "tool",
+        lastActivityAt: now - 5,
+      },
+    ]);
+
+    assert.equal(snapshot.total, 3);
+    assert.equal(snapshot.claudeCount, 1);
+    assert.equal(snapshot.codexCount, 2);
+    assert.deepEqual(
+      snapshot.entries.map((entry) => entry.pid),
+      [31, 32, 30],
+    );
+    assert.match(snapshot.entries[0].label, /marmonitor/);
+    assert.notEqual(snapshot.entries[0].label, snapshot.entries[2].label);
+  });
+
+  it("chooses full, compact, minimal, or hidden idle rail variants by width budget", () => {
+    const snapshot = {
+      total: 5,
+      claudeCount: 2,
+      codexCount: 3,
+      entries: [
+        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: 100 },
+        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: 99 },
+        { pid: 3, agent: "codex", cwd: "/repo/c", label: "fmbattle", lastAt: 98 },
+      ],
+    };
+
+    assert.equal(buildIdleRightRail(snapshot, 170, 80), "idle Cl2 Cx3 | marmonitor · roam-new · fmbattle");
+    assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle Cl2 Cx3");
+    assert.equal(buildIdleRightRail(snapshot, 130, 7), "idle 5");
+    assert.equal(buildIdleRightRail(snapshot, 80, 80), undefined);
+    assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
+  });
+
+  it("joins left and right rails without counting tmux markup in visible width", () => {
+    const left = "#[range=user|sum:codex]Cx 3#[norange]  #[range=user|pid:10]1 Cx repo 5s#[norange]";
+    const right = "idle Cl1 Cx2";
+    assert.equal(visibleTextWidth(left), "Cx 3  1 Cx repo 5s".length);
+    assert.equal(
+      joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 4),
+      `${left}    ${right}`,
+    );
+    assert.equal(joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 1), left);
   });
 });

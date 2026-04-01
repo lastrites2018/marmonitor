@@ -263,6 +263,29 @@ export interface AttentionBuildOptions {
 
 const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
 
+export interface IdleRightRailEntry {
+  pid: number;
+  agent: "claude" | "codex";
+  cwd: string;
+  label: string;
+  lastAt: number;
+}
+
+export interface IdleRightRailSnapshot {
+  total: number;
+  claudeCount: number;
+  codexCount: number;
+  entries: IdleRightRailEntry[];
+}
+
+export function stripTmuxFormatting(text: string): string {
+  return text.replace(/#\[[^\]]*]/g, "");
+}
+
+export function visibleTextWidth(text: string): number {
+  return stripTmuxFormatting(text).length;
+}
+
 export interface StatusPill {
   label: string;
   fg: string;
@@ -513,6 +536,89 @@ function attentionActivityTime(
   agent: Pick<AgentSession, "lastActivityAt" | "lastResponseAt" | "startedAt">,
 ): number {
   return agent.lastActivityAt ?? agent.lastResponseAt ?? agent.startedAt ?? 0;
+}
+
+export function isIdleRightRailCandidate(agent: AgentSession): boolean {
+  const supportedAgent = agent.agentName === "Claude Code" || agent.agentName === "Codex";
+  if (!supportedAgent) return false;
+  if (agent.status !== "Idle") return false;
+  if (agent.phase === "permission" || agent.phase === "thinking" || agent.phase === "tool") {
+    return false;
+  }
+  return true;
+}
+
+export function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRightRailSnapshot {
+  const idleAgents = agents
+    .filter((agent) => isIdleRightRailCandidate(agent))
+    .sort((a, b) => {
+      const activityDiff = attentionActivityTime(b) - attentionActivityTime(a);
+      if (activityDiff !== 0) return activityDiff;
+      const agentDiff = a.agentName.localeCompare(b.agentName);
+      if (agentDiff !== 0) return agentDiff;
+      return a.pid - b.pid;
+    });
+
+  const labels = buildStatuslinePathLabels(idleAgents, 22);
+  const entries: IdleRightRailEntry[] = idleAgents.map((agent, index) => ({
+    pid: agent.pid,
+    agent: agent.agentName === "Claude Code" ? "claude" : "codex",
+    cwd: agent.cwd,
+    label: labels[index],
+    lastAt: attentionActivityTime(agent),
+  }));
+
+  return {
+    total: entries.length,
+    claudeCount: entries.filter((entry) => entry.agent === "claude").length,
+    codexCount: entries.filter((entry) => entry.agent === "codex").length,
+    entries,
+  };
+}
+
+function buildIdleRightRailCounts(snapshot: IdleRightRailSnapshot): string[] {
+  const parts: string[] = [];
+  if (snapshot.claudeCount > 0) parts.push(`Cl${snapshot.claudeCount}`);
+  if (snapshot.codexCount > 0) parts.push(`Cx${snapshot.codexCount}`);
+  return parts;
+}
+
+export function buildIdleRightRail(
+  snapshot: IdleRightRailSnapshot,
+  width: number | undefined,
+  availableWidth: number,
+): string | undefined {
+  if (!width || width < 90 || snapshot.total === 0 || availableWidth <= 0) {
+    return undefined;
+  }
+
+  const countParts = buildIdleRightRailCounts(snapshot);
+  const countLabel = countParts.length > 0 ? countParts.join(" ") : String(snapshot.total);
+  const minimal = `idle ${snapshot.total}`;
+  const compact = `idle ${countLabel}`;
+  const nameLimit = width < 160 ? 2 : 3;
+  const names = snapshot.entries
+    .slice(0, nameLimit)
+    .map((entry) => entry.label)
+    .join(" · ");
+  const full = names ? `idle ${countLabel} | ${names}` : compact;
+
+  const variants = [full, compact, minimal];
+  return variants.find((variant) => visibleTextWidth(variant) <= availableWidth);
+}
+
+export function joinLeftAndRightRail(
+  left: string,
+  right: string | undefined,
+  width: number | undefined,
+  gap = 2,
+): string {
+  if (!right || !width || width <= 0) return left;
+  const leftWidth = visibleTextWidth(left);
+  const rightWidth = visibleTextWidth(right);
+  const spaceBudget = width - leftWidth - rightWidth;
+  if (spaceBudget < gap) return left;
+  return `${left}${" ".repeat(spaceBudget)}${right}`;
 }
 
 function orderedAttentionItems(items: AttentionItem[]): AttentionItem[] {
