@@ -1,227 +1,231 @@
-summary popup 이후 로드맵
+statusline UX 이후 로드맵
 
 목적
-- summary badge 클릭 기능 이후에 어떤 순서로 기능을 확장할지 정리한다.
-- 성능보다 UX, 상호작용, 운영 품질을 개선하는 순서에 초점을 둔다.
-
-로드맵
+- summary popup과 idle right rail이 구현된 이후, 남은 기능/UX/운영 과제를 실제 상태 기준으로 다시 정렬한다.
+- 성능보다 동시 작업 운영 효율, 상태 정보의 의미 정확도, collector 기반 안정성에 초점을 둔다.
 
 실제 코드 기준 상태
 - 기준 시점: 2026-04-01
-- 1. summary popup 1차 MVP: 완료
-- 2. summary popup 2차 인터랙션: 진행 중
-- 3. `⚠` 의미 복원: 부분 완료
-  - `Stalled / Unmatched` 섹션 분리 반영
-  - `Risk`는 placeholder만 있고 실제 데이터는 아직 없음
-- 4. attention UX 정제: 부분 완료
-  - stale thinking/tool 강등 반영
-  - active `•` 표식 제거 반영
-  - dedupe / grouping 규칙은 미완
-- 5. collector 운영 품질 강화: 부분 완료
-  - stale artifact 방지, config mismatch guard, health model 일부 반영
-  - refresh 중 last-good statusline 재사용 반영
-  - collector lock heartbeat / dead-pid reclaim 반영
-  - auto-restart / diagnostics 확장은 미완
-- 6. popup / dock / watch 역할 정리: 미시작
-- 7. 더 큰 아키텍처 확장: 보류
+- 1. summary popup MVP: 완료
+- 2. summary popup interactive chooser: 완료
+- 3. idle right rail MVP: 완료
+- 4. `⚠` 의미 복원: 부분 완료
+  - `Stalled / Unmatched` 섹션 분리 완료
+  - `Risk`는 구조만 있고 실데이터는 없음
+- 5. attention UX 정제: 부분 완료
+  - stale thinking/tool 강등 완료
+  - active `•` 표식 제거 완료
+  - `recent-complete / warm-idle / cold-idle` projection 정제는 미완
+  - 현재 구현은 일부를 recent activity 기반으로 근사하고 있으며, 전이 기준 모델은 아직 미도입
+- 6. collector 운영 품질: 부분 완료
+  - collector-backed statusline / popup 경로 완료
+  - tmux summary click의 collector-only contract 완료
+  - manual popup fallback 정책은 유지 중
+- 7. popup / dock / watch 역할 정리: 미시작
+- 8. 더 큰 아키텍처 확장: 보류
 
-1. summary popup 1차 MVP
+현재 가장 중요한 판단
+- popup은 이미 쓸 수 있는 수준까지 왔다.
+- idle right rail도 구현되었다.
+- 따라서 다음 우선순위는 "새 surface 추가"가 아니라:
+  - 왼쪽 attention 영역의 noise를 줄이고
+  - `⚠` 의미를 더 정확히 만들고
+  - collector 상태를 더 이해 가능하게 만드는 것
+  이다.
 
-목표
-- summary badge를 행동 가능한 UI로 만든다.
-
-상태
-- 완료
-
-범위
-- clickable badge:
-  - `Cl`
-  - `Cx`
-  - `Gm`
-  - `⏳`
-  - `🤔`
-  - `🔧`
-  - `⚠`
-- non-clickable 유지:
-  - `✅`
-  - `AI`
-- popup:
-  - 현재 구현은 read-only filtered popup
-- 기존 상세 항목 `pid` 클릭 점프는 그대로 유지
-
-핵심 구현 단위
-- `SummaryPopupTarget` 모델
-- `selectSummaryPopupItems()`
-- `renderSummaryPopup()`
-- `marmonitor popup --summary-target <target>`
-- tmux click routing 확장
-
-수용 기준
-- badge 의미와 popup 결과가 정확히 일치
-- 기존 상세 항목 클릭 동작 회귀 없음
-- summary badge 클릭 시 popup이 안정적으로 열림
-
-2. summary popup 2차 인터랙션
-
-목표
-- popup 안에서 바로 jump 가능하게 만든다.
+1. attention noise 축소
 
 상태
-- 진행 중
+- 최우선
 
-범위
-- 번호 선택 jump
-- `q` close
-- `Enter` 기본 항목 jump
+왜 지금 이게 먼저인가
+- idle right rail이 생기면서 statusline 하단의 역할 분리가 이미 생겼다.
+  - 왼쪽: 지금 바로 대응해야 하는 것
+  - 오른쪽: 지금 다시 투입 가능한 것
+- 이 상태에서 왼쪽이 여전히 오래된 active나 같은 repo 중복으로 noisy하면 전체 UX가 다시 흐려진다.
 
-핵심 구현 단위
-- popup chooser 입력 루프
-- target client 유지
-- jump-back anchor 연동 검토
+현재 문제
+- `buildAttentionItems()`는 permission / recent thinking만 tier1이다.
+- 나머지 alive 세션은 전부 tier2로 들어와 최근 활동 순으로 정렬된다.
+- 그 결과:
+  - 방금 끝난 세션과 단순 idle 세션이 같은 층으로 보일 수 있다.
+  - 1시간 넘은 cold-idle이 statusline 의미를 흐릴 수 있다.
+  - 같은 repo의 비슷한 세션이 여러 개 나란히 올라올 수 있다.
+  - statusline의 "action-now" 의미가 약해질 수 있다.
 
-수용 기준
-- popup에서 선택한 항목이 정확한 pane/session으로 이동
-- 현재 상세 item direct jump와 충돌 없음
-- statusline badge 클릭은 live scan 없이 collector snapshot만 사용
-
-1차 구현 메모
-- summary badge 클릭은 interactive popup으로 연다.
-- popup 내부에서는:
-  - `1-9` 선택 jump
-  - `0`은 10번 항목 jump
-  - `Enter`는 1번 항목 jump
-  - `q` / `Esc`는 종료
-- 1차에서는 상위 10개 항목만 직접 선택 대상으로 본다.
-- popup chooser는 기존 `jumpToAgentWithAnchor()`를 재사용해서 jump-back anchor semantics를 유지한다.
-
-3. `⚠` 의미 복원
-
-목표
-- statusline의 압축된 `⚠`를 popup에서 풀어 보여준다.
-
-범위
-- `Stalled`
-- `Unmatched`
-- future: `Risk`
-
-핵심 구현 단위
-- issue filter 분리
-- popup section render
+핵심 방향
+- popup / jump / watch의 전체 attention 후보는 그대로 두고
+- statusline에 보여주는 top attention detail만 더 보수적으로 투영한다.
+- 특히:
+  - `recent-complete`는 왼쪽에 잠깐 유지
+  - `warm-idle`은 오른쪽 rail에 유지
+  - `cold-idle`은 statusline surface에서 제외
+  하는 방향이 맞다.
+- 즉 "데이터를 줄이는 것"이 아니라 "statusline surface에만 더 강한 노이즈 필터를 적용"하는 방향이 맞다.
+- 이때 가장 중요한 것은 시간 구간보다 전이 기준이다.
+  - `recent-complete`는 `thinking/tool -> idle` 전환이 최근에 있었는지로 판단해야 한다.
+  - `warm-idle`은 `lastActivityAt`보다 idle 진입 시각 기준이 더 적합하다.
+  - collector 재시작이나 snapshot 교체 시 이력이 끊기지 않도록 최소 전이 필드를 공용 상태에 유지해야 한다.
 
 수용 기준
-- `⚠ n` 숫자와 popup 총합이 일치
-- 섹션별 의미가 사용자에게 분명함
-- summary badge 클릭으로 여는 popup이 statusline 성능을 다시 악화시키지 않음
+- 왼쪽 상단 detail은 왜 이 항목이 보이는지 설명 가능해야 한다.
+- `recent-complete`는 5분까지만 왼쪽에 남아야 한다.
+- `warm-idle`은 오른쪽에만 남아야 한다.
+- `cold-idle`은 statusline에서 빠져야 한다.
+- 같은 repo의 반복 항목은 statusline에서 과도하게 중복되지 않아야 한다.
+- popup / jump의 정보 손실은 생기지 않아야 한다.
 
-4. attention UX 정제
+2. `⚠` 의미 완성
 
-목표
-- top list가 더 행동 중심이 되도록 다듬는다.
+상태
+- 다음 우선순위
 
-범위
-- 오래된 `active(•)` 축소
-- 동일 repo grouping / dedupe
-- top N selection 규칙 보정
+이미 된 것
+- popup 내부 `Stalled`
+- popup 내부 `Unmatched`
+- `Risk` 섹션 placeholder
 
-핵심 구현 단위
-- attention ranking 규칙 분리
-- grouping 정책 추가
+남은 것
+- `Risk` 실데이터 모델링
+- heading / empty-state 표현 정리
 
 수용 기준
-- 상태줄에서 왜 이 항목이 보이는지 설명 가능
-- 오래된 noise가 상위로 올라오지 않음
+- `⚠ n`과 popup 총합 일치
+- 각 섹션의 의미가 사용자에게 바로 이해됨
 
-5. collector 운영 품질 강화
+3. collector 운영 가시화
+
+상태
+- 다음 우선순위
 
 목표
-- 빠른 것뿐 아니라 안정적으로 동작하게 만든다.
+- collector가 이상할 때 "왜 지금 상태가 이런지"가 보이게 한다.
 
-범위
-- `stale/degraded` 표시
-- auto-restart
-- artifact/schema versioning
-- config mismatch 진단
-
-핵심 구현 단위
-- collector health model 확장
-- recovery policy
-- diagnostics command
+후보
+- stale/degraded 표시
+- fallback 이유 노출
+- health / diagnostics 강화
 
 수용 기준
 - collector 비정상 시 사용자가 상태를 이해 가능
-- stale artifact 문제 재발 방지
+- "왜 fallback 됐는지"를 설명 가능
 
-6. popup / dock / watch 역할 정리
+4. popup discoverability / 미세 UX
 
-목표
-- 각 surface가 중복되지 않게 한다.
-
-범위
-- statusline: 요약
-- popup: drill-down / jump
-- dock: 지속 모니터
-- watch/status: full inspection
-
-수용 기준
-- 같은 정보를 여러 surface가 어설프게 중복하지 않음
-
-7. 필요할 때만 최종 구조 확장
+상태
+- 중간 우선순위
 
 목표
-- 정말 필요할 때만 더 무거운 구조로 간다.
+- 이미 있는 기능을 더 쉽게 알 수 있게 한다.
 
 후보
-- full collector
-- direct file-read tmux path
-- stronger daemon lifecycle
+- tmux 문서/예제에 clickable affordance 명시
+- popup controls 문구 정리
+- `summary badge opens popup, detail item jumps directly`
+
+수용 기준
+- 새 사용자가 문서만으로 클릭/조작을 이해 가능
+
+5. popup grouping / dedupe 재평가
+
+상태
+- 보류
+
+이유
+- 실제 사용에서 flat chooser가 충분하다면 굳이 복잡도를 올릴 필요가 없다.
+
+후보
+- repo 단위 dedupe
+- label 충돌 완화
+- same-project 묶음
 
 판단 기준
-- 현재 UX/운영 개선으로도 부족한가
-- 여전히 latency나 stability 이슈가 반복되는가
+- flat list가 실제로 탐색 비용을 높이는가
 
-우선순위
-1. popup 내 jump의 상위 10개 제한 확장 판단
-2. `⚠`의 `Risk` 실데이터 모델링
-3. popup의 collector-only 데이터 계약을 statusline click 외 경로까지 더 엄격히 고정할지 결정
-4. attention dedupe / active 축소
-5. collector 운영 품질
-6. surface 역할 정리
-7. 더 큰 아키텍처 확장
+6. popup 데이터 계약 정리
+
+상태
+- 보류하되 추적 필요
+
+현재 계약
+- tmux summary click:
+  - `--collector-only`
+  - live scan fallback 없음
+- manual `marmonitor popup`:
+  - collector 우선
+  - collector 없으면 live fallback 가능
+
+남은 질문
+- manual popup도 collector-only 기본으로 바꿀지
+- 아니면 운영/디버깅 도구로서 fallback을 유지할지
+
+수용 기준
+- latency-sensitive 경로와 manual debug 경로의 계약이 문서상/코드상 모두 명확
+
+7. 더 큰 구조 확장
+
+상태
+- 보류
+
+후보
+- `✅`, `AI` clickable
+- richer popup navigation
+- popup 안 검색
+- stronger collector / daemon diagnostics
+
+판단 기준
+- 현재 UX로도 충분한가
+- 운영 문제나 탐색 비용이 반복되는가
+
+현재 추천 우선순위
+1. attention noise 축소
+2. `⚠`의 `Risk` 실데이터 판단
+3. collector 운영 가시화
+4. popup discoverability 문구 추가
+5. popup grouping / dedupe 재평가
+6. manual popup data contract 재결정
+7. 더 큰 구조 확장
 
 병렬 작업 기준
-- 다른 세션에서 바로 구현해도 되는 것:
-  - popup 내 jump
-  - `⚠` 섹션 분리
-  - popup의 collector-only 데이터 계약 고정
-- 설계 더 보고 들어가는 게 좋은 것:
-  - 4
-  - 5
-- 실제 사용 데이터 보고 결정할 것:
-  - 6
-  - 7
+- 다른 세션에서 바로 구현해도 되는 것
+  - attention noise 축소
+  - `Risk` 실데이터 모델링
+  - discoverability 문구
+- 설계 더 보고 들어가는 게 좋은 것
+  - popup grouping / dedupe
+  - manual popup contract 변경
+- 실제 사용 데이터 보고 결정할 것
+  - `✅`, `AI` clickable
+  - richer popup navigation
 
 Simple Made Easy 기준 경계
 
 순수 모델
 - `SummaryPopupTarget`
-- filter / ranking
-- section grouping
+- selection / ranking
+- issue section grouping
+- statusline attention projection 규칙
 
 파생 렌더
 - statusline summary range
-- popup text
+- popup page render
+- idle right rail 문자열
+- attention top-N 표시 문자열
 
 워크플로
 - popup open
+- chooser input
 - jump action
 - tmux client targeting
 
 운영
 - collector health
-- restart
-- stale handling
+- collector-only contract
+- live fallback policy
 
 메타 결론
-- summary badge -> popup 자체는 완료되었다.
-- 다음 단계의 핵심은 popup을 jump 가능한 chooser로 만들고, `⚠`의 의미를 popup 안에서 복원하며, popup data path를 collector snapshot 중심으로 고정하는 것이다.
-- 그 이후는 noise 축소와 collector 운영 품질 개선으로 가는 것이 맞다.
+- popup과 idle right rail은 이미 usable 상태다.
+- 지금 남은 핵심은 새 기능 추가가 아니라,
+  - 왼쪽 attention 영역을 더 조용하고 설명 가능하게 만들고
+  - `⚠` 의미를 완성하고
+  - collector 상태를 더 이해 가능하게 만드는 것이다.

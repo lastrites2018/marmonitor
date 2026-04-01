@@ -254,6 +254,8 @@ export interface AttentionItem {
   phase?: AgentSession["phase"];
   lastResponseAt?: number;
   lastActivityAt?: number;
+  idleSince?: number;
+  recentCompleteAt?: number;
 }
 
 export interface AttentionBuildOptions {
@@ -262,6 +264,14 @@ export interface AttentionBuildOptions {
 }
 
 const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
+const DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC = 5 * 60;
+const DEFAULT_WARM_IDLE_MIN_AGE_SEC = 5 * 60 + 1;
+const DEFAULT_WARM_IDLE_MAX_AGE_SEC = 60 * 60 - 1;
+
+export interface StatuslineAttentionOptions {
+  nowSec?: number;
+  recentCompleteMaxAgeSec?: number;
+}
 
 export interface IdleRightRailEntry {
   pid: number;
@@ -276,6 +286,18 @@ export interface IdleRightRailSnapshot {
   claudeCount: number;
   codexCount: number;
   entries: IdleRightRailEntry[];
+}
+
+export interface StatuslineAttentionRepresentative {
+  kind: Exclude<AttentionKind, "unmatched" | "stalled">;
+  pid: number;
+  agentName: string;
+  cwd: string;
+  label: string;
+  lastAt: number;
+  collapsedCount: number;
+  status: AgentSession["status"];
+  phase: AgentSession["phase"];
 }
 
 export interface StatuslineRealtimeView {
@@ -550,20 +572,57 @@ function attentionActivityTime(
   return agent.lastActivityAt ?? agent.lastResponseAt ?? agent.startedAt ?? 0;
 }
 
-export function isIdleRightRailCandidate(agent: AgentSession): boolean {
+function idleReferenceTime(
+  agent: Pick<AgentSession, "idleSince" | "lastActivityAt" | "lastResponseAt" | "startedAt">,
+): number | undefined {
+  return agent.idleSince ?? agent.lastActivityAt ?? agent.lastResponseAt ?? agent.startedAt;
+}
+
+function idleAgeSec(
+  agent: Pick<AgentSession, "idleSince" | "lastActivityAt" | "lastResponseAt" | "startedAt">,
+  nowSec: number,
+): number | undefined {
+  const idleAt = idleReferenceTime(agent);
+  if (!idleAt) return undefined;
+  return Math.max(0, nowSec - idleAt);
+}
+
+function isRecentCompleteSession(
+  agent: Pick<AgentSession, "status" | "recentCompleteAt">,
+  nowSec: number,
+  recentCompleteMaxAgeSec: number,
+): boolean {
+  if (agent.status !== "Idle" || !agent.recentCompleteAt) return false;
+  return Math.max(0, nowSec - agent.recentCompleteAt) <= recentCompleteMaxAgeSec;
+}
+
+export function isIdleRightRailCandidate(
+  agent: AgentSession,
+  options: { nowSec?: number } = {},
+): boolean {
+  const nowSec = options.nowSec ?? Date.now() / 1000;
   const supportedAgent = agent.agentName === "Claude Code" || agent.agentName === "Codex";
   if (!supportedAgent) return false;
   if (agent.status !== "Idle") return false;
   if (agent.phase === "permission" || agent.phase === "thinking" || agent.phase === "tool") {
     return false;
   }
-  return true;
+  if (isRecentCompleteSession(agent, nowSec, DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC)) return false;
+  const age = idleAgeSec(agent, nowSec);
+  if (age === undefined) return false;
+  return age >= DEFAULT_WARM_IDLE_MIN_AGE_SEC && age <= DEFAULT_WARM_IDLE_MAX_AGE_SEC;
 }
 
-export function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRightRailSnapshot {
+export function selectIdleSessionsForRightRail(
+  agents: AgentSession[],
+  options: { nowSec?: number } = {},
+): IdleRightRailSnapshot {
+  const nowSec = options.nowSec ?? Date.now() / 1000;
   const idleAgents = agents
-    .filter((agent) => isIdleRightRailCandidate(agent))
+    .filter((agent) => isIdleRightRailCandidate(agent, { nowSec }))
     .sort((a, b) => {
+      const idleDiff = (idleReferenceTime(b) ?? 0) - (idleReferenceTime(a) ?? 0);
+      if (idleDiff !== 0) return idleDiff;
       const activityDiff = attentionActivityTime(b) - attentionActivityTime(a);
       if (activityDiff !== 0) return activityDiff;
       const agentDiff = a.agentName.localeCompare(b.agentName);
@@ -577,7 +636,7 @@ export function selectIdleSessionsForRightRail(agents: AgentSession[]): IdleRigh
     agent: agent.agentName === "Claude Code" ? "claude" : "codex",
     cwd: agent.cwd,
     label: labels[index],
-    lastAt: attentionActivityTime(agent),
+    lastAt: idleReferenceTime(agent) ?? attentionActivityTime(agent),
   }));
 
   return {
@@ -620,7 +679,9 @@ export function buildStatuslineRealtimeView(
     snapshot,
     attentionItems,
     jumpItems,
-    idleSnapshot: options.includeIdleSnapshot ? selectIdleSessionsForRightRail(agents) : undefined,
+    idleSnapshot: options.includeIdleSnapshot
+      ? selectIdleSessionsForRightRail(agents, { nowSec: options.nowSec })
+      : undefined,
   };
 }
 
@@ -776,6 +837,8 @@ export function buildAttentionItems(
     phase: agent.phase,
     lastResponseAt: agent.lastResponseAt,
     lastActivityAt: agent.lastActivityAt,
+    idleSince: agent.idleSince,
+    recentCompleteAt: agent.recentCompleteAt,
   });
 
   const tier1 = alive
@@ -825,6 +888,108 @@ export function buildJumpAttentionItems(
   return orderedAttentionItems(buildAttentionItems(agents, options));
 }
 
+function isRecentCompleteAttention(
+  item: AttentionItem,
+  nowSec: number,
+  recentCompleteMaxAgeSec: number,
+): boolean {
+  if (item.kind !== "active" || item.status !== "Idle") return false;
+  return isRecentCompleteSession(item, nowSec, recentCompleteMaxAgeSec);
+}
+
+function collapseStatuslineAttentionDuplicates(
+  items: AttentionItem[],
+  maxLabelLength: number,
+): StatuslineAttentionRepresentative[] {
+  const grouped = new Map<string, AttentionItem[]>();
+  for (const item of items) {
+    const key = statuslineRepoLabel(item.cwd);
+    const existing = grouped.get(key) ?? [];
+    existing.push(item);
+    grouped.set(key, existing);
+  }
+
+  return [...grouped.entries()]
+    .map(([repoLabel, groupedItems]) => {
+      const sorted = [...groupedItems].sort((a, b) => {
+        const activityDiff = attentionActivityTime(b) - attentionActivityTime(a);
+        if (activityDiff !== 0) return activityDiff;
+        const agentDiff = a.agentName.localeCompare(b.agentName);
+        if (agentDiff !== 0) return agentDiff;
+        return a.pid - b.pid;
+      });
+      const representative = sorted[0];
+      const suffix = sorted.length > 1 ? ` +${sorted.length - 1}` : "";
+      return {
+        kind: representative.kind as Exclude<AttentionKind, "unmatched" | "stalled">,
+        pid: representative.pid,
+        agentName: representative.agentName,
+        cwd: representative.cwd,
+        label: truncateMiddle(`${repoLabel}${suffix}`, maxLabelLength),
+        lastAt: representative.recentCompleteAt ?? attentionActivityTime(representative),
+        collapsedCount: sorted.length - 1,
+        status: representative.status,
+        phase: representative.phase,
+      } satisfies StatuslineAttentionRepresentative;
+    })
+    .sort((a, b) => {
+      const activityDiff = b.lastAt - a.lastAt;
+      if (activityDiff !== 0) return activityDiff;
+      const agentDiff = a.agentName.localeCompare(b.agentName);
+      if (agentDiff !== 0) return agentDiff;
+      return a.pid - b.pid;
+    });
+}
+
+export function buildStatuslineAttentionRepresentatives(
+  items: AttentionItem[],
+  maxCount = 5,
+  width?: number,
+  options: StatuslineAttentionOptions = {},
+): StatuslineAttentionRepresentative[] {
+  if (maxCount <= 0 || items.length === 0) return [];
+  const nowSec = options.nowSec ?? Date.now() / 1000;
+  const recentCompleteMaxAgeSec =
+    options.recentCompleteMaxAgeSec ?? DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC;
+  const layout = resolveStatuslineDetailLayout(width, maxCount);
+
+  const immediate = orderedAttentionItems(
+    items.filter(
+      (item) => item.kind === "permission" || item.kind === "thinking" || item.kind === "tool",
+    ),
+  ).map((item) => ({
+    kind: item.kind as Exclude<AttentionKind, "unmatched" | "stalled">,
+    pid: item.pid,
+    agentName: item.agentName,
+    cwd: item.cwd,
+    label: "",
+    lastAt: attentionActivityTime(item),
+    collapsedCount: 0,
+    status: item.status,
+    phase: item.phase,
+  }));
+
+  const recentComplete = collapseStatuslineAttentionDuplicates(
+    items.filter((item) => isRecentCompleteAttention(item, nowSec, recentCompleteMaxAgeSec)),
+    layout.pathMaxLength,
+  );
+
+  const rawItems = [...immediate, ...recentComplete].slice(0, layout.itemCount);
+  if (rawItems.length === 0) return [];
+
+  const unresolved = rawItems.filter((item) => item.kind !== "active");
+  const pathLabels = buildStatuslinePathLabels(unresolved, layout.pathMaxLength);
+  let pathIndex = 0;
+
+  return rawItems.map((item) => {
+    if (item.kind === "active") return item;
+    const label =
+      pathLabels[pathIndex] ?? compactStatuslineDirLabel(item.cwd, layout.pathMaxLength);
+    pathIndex += 1;
+    return { ...item, label };
+  });
+}
+
 export function selectJumpAttentionItem(
   agents: AgentSession[],
   selection: number,
@@ -863,6 +1028,33 @@ export function buildAttentionFocusText(
       segments.push(time ? `${agent} ${path} ${time}` : `${agent} ${path}`);
     }
   }
+
+  return segments.length > 0 ? segments.join(" │ ") : undefined;
+}
+
+export function buildStatuslineAttentionFocusText(
+  items: AttentionItem[],
+  maxCount = 3,
+  width?: number,
+  options: StatuslineAttentionOptions = {},
+): string | undefined {
+  const detailItems = buildStatuslineAttentionRepresentatives(items, maxCount, width, options);
+  if (detailItems.length === 0) return undefined;
+
+  const segments = detailItems.map((item) => {
+    const agent = agentShortName(item.agentName);
+    const time = formatElapsedCompact(item.lastAt);
+    if (item.kind === "permission") {
+      return `⏳${agent} ${item.label} allow`;
+    }
+    if (item.kind === "thinking") {
+      return time ? `🤔${agent} ${item.label} ${time}` : `🤔${agent} ${item.label}`;
+    }
+    if (item.kind === "tool") {
+      return time ? `🔧${agent} ${item.label} ${time}` : `🔧${agent} ${item.label}`;
+    }
+    return time ? `${agent} ${item.label} ${time}` : `${agent} ${item.label}`;
+  });
 
   return segments.length > 0 ? segments.join(" │ ") : undefined;
 }
@@ -1146,6 +1338,51 @@ export function buildTmuxAttentionPills(
               : time
                 ? `⚠${agent} ${path} ${time}`
                 : `⚠${agent} ${path}`;
+    const content =
+      style === "pill"
+        ? tmuxAttentionSegment(index + 1, item.kind, label)
+        : style === "minimal"
+          ? tmuxAttentionSegmentMinimal(index + 1, item.kind, label)
+          : `${index + 1} ${label}`;
+    return tmuxUserRange(`pid:${item.pid}`, content);
+  });
+
+  return segments.join("  ");
+}
+
+export function buildTmuxStatuslineAttentionPills(
+  items: AttentionItem[],
+  maxCount = 5,
+  width?: number,
+  style: TmuxBadgeStyle = "plain",
+  options: StatuslineAttentionOptions = {},
+): string | undefined {
+  const jumpItems = buildStatuslineAttentionRepresentatives(items, maxCount, width, options);
+  if (jumpItems.length === 0) {
+    return style === "pill"
+      ? tmuxDetailBlock("no active")
+      : style === "minimal"
+        ? tmuxTextAccent("no active", "#bac2de")
+        : "no active";
+  }
+
+  const segments = jumpItems.map((item, index) => {
+    const agent = agentShortName(item.agentName);
+    const time = formatElapsedCompact(item.lastAt);
+    const label =
+      item.kind === "permission"
+        ? `⏳${agent} ${item.label} allow`
+        : item.kind === "thinking"
+          ? time
+            ? `🤔${agent} ${item.label} ${time}`
+            : `🤔${agent} ${item.label}`
+          : item.kind === "tool"
+            ? time
+              ? `🔧${agent} ${item.label} ${time}`
+              : `🔧${agent} ${item.label}`
+            : time
+              ? `${agent} ${item.label} ${time}`
+              : `${agent} ${item.label}`;
     const content =
       style === "pill"
         ? tmuxAttentionSegment(index + 1, item.kind, label)

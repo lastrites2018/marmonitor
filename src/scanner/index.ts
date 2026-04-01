@@ -47,6 +47,7 @@ import {
   listProcessesCached,
 } from "./runtime-snapshot.js";
 import { detectCliStdoutPhase, determineStatus } from "./status.js";
+import { deriveSessionTransitionState } from "./transitions.js";
 
 import type { ScanOptions } from "./types.js";
 
@@ -69,9 +70,7 @@ export async function scanAgents(
   const includeTokenUsage = options.includeTokenUsage ?? isFullEnrichment;
   const includeStdoutHeuristic = options.includeStdoutHeuristic ?? isFullEnrichment;
   const useSharedRuntimeSnapshots = options.useSharedRuntimeSnapshots ?? false;
-  const seededSessions = !isFullEnrichment
-    ? buildSeedSessionIndex(options.seedSessions)
-    : undefined;
+  const seededSessions = buildSeedSessionIndex(options.seedSessions);
   const seenPids = new Set<number>();
 
   // 1. Find running processes
@@ -143,6 +142,8 @@ export async function scanAgents(
     let phase: SessionPhase;
     let lastResponseAt: number | undefined;
     let lastActivityAt: number | undefined;
+    let idleSince: number | undefined;
+    let recentCompleteAt: number | undefined;
     let codexSessionFile: string | undefined;
     const runtimeSource = detectRuntimeSource(agentName, proc.cmd);
     const cacheKey = `${agentName}:${proc.pid}`;
@@ -159,6 +160,8 @@ export async function scanAgents(
       phase = cachedEnrichment.phase;
       lastResponseAt = cachedEnrichment.lastResponseAt;
       lastActivityAt = cachedEnrichment.lastActivityAt;
+      idleSince = cachedEnrichment.idleSince;
+      recentCompleteAt = cachedEnrichment.recentCompleteAt;
     } else if (agentName === "Claude Code") {
       let processCwd =
         seededSession?.cwd && seededSession.cwd !== "unknown" ? seededSession.cwd : undefined;
@@ -295,6 +298,18 @@ export async function scanAgents(
     const statusBaseAt = lastActivityAt ?? lastResponseAt ?? startedAt;
     const elapsed = statusBaseAt ? Date.now() / 1000 - statusBaseAt : undefined;
     const status = determineStatus(cpuPercent, elapsed, sessionMatched, phase, config);
+    const transitionState = deriveSessionTransitionState(
+      {
+        status,
+        phase,
+        lastActivityAt,
+        lastResponseAt,
+        startedAt,
+      },
+      seededSession,
+    );
+    idleSince = transitionState.idleSince;
+    recentCompleteAt = transitionState.recentCompleteAt;
 
     const session = {
       agentName,
@@ -313,6 +328,8 @@ export async function scanAgents(
       lastResponseAt,
       lastActivityAt,
       runtimeSource,
+      idleSince,
+      recentCompleteAt,
     } as AgentSession;
 
     if (isFullEnrichment) {
@@ -327,6 +344,8 @@ export async function scanAgents(
         lastResponseAt: session.lastResponseAt,
         lastActivityAt: session.lastActivityAt,
         runtimeSource: session.runtimeSource,
+        idleSince: session.idleSince,
+        recentCompleteAt: session.recentCompleteAt,
       });
     }
 

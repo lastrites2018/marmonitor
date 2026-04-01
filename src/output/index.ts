@@ -15,11 +15,13 @@ import {
   buildAttentionFocusText,
   buildAttentionItems,
   buildJumpAttentionItems,
+  buildStatuslineAttentionFocusText,
   buildStatuslineRealtimeView,
   buildStatuslineSummary,
   buildTmuxAttentionPills,
   buildTmuxBadgeBar,
   buildTmuxIdleRightRail,
+  buildTmuxStatuslineAttentionPills,
   compactDirLabel,
   formatElapsed,
   formatTokens,
@@ -536,9 +538,12 @@ export async function renderStatusline(
 
     if (format === "tmux-badges") {
       const style = options.tmuxBadgeStyle ?? "plain";
-      const focusText = buildTmuxAttentionPills(jumpItems ?? [], attentionLimit, width, style, {
-        ordered: true,
-      });
+      const focusText = buildTmuxStatuslineAttentionPills(
+        jumpItems ?? [],
+        attentionLimit,
+        width,
+        style,
+      );
       const left = buildTmuxBadgeBar(snapshot, focusText, style);
       const right = buildTmuxIdleRightRail(
         idleSnapshot ?? { total: 0, claudeCount: 0, codexCount: 0, entries: [] },
@@ -549,7 +554,7 @@ export async function renderStatusline(
     }
 
     if (format === "wezterm-pills") {
-      const focusText = buildAttentionFocusText(
+      const focusText = buildStatuslineAttentionFocusText(
         jumpItems ?? attentionItems ?? [],
         attentionLimit,
         width,

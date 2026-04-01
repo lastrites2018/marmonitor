@@ -43,6 +43,8 @@ export function propagateWorkerStateToParent(
       child.startedAt ?? 0,
     ),
     lastResponseAt: Math.max(parent.lastResponseAt ?? 0, child.lastResponseAt ?? 0) || undefined,
+    idleSince: undefined,
+    recentCompleteAt: undefined,
   };
 }
 

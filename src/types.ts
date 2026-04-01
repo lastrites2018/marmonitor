@@ -44,6 +44,8 @@ export interface AgentSession {
   lastResponseAt?: number; // epoch seconds — last AI response
   lastActivityAt?: number; // epoch seconds — last any event
   runtimeSource?: RuntimeSource;
+  idleSince?: number; // epoch seconds — when the session entered Idle
+  recentCompleteAt?: number; // epoch seconds — recent thinking/tool -> idle transition
 }
 
 /** Agent detection signature */

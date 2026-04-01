@@ -7,12 +7,15 @@ import {
   buildIdleRightRail,
   buildJumpAttentionItems,
   buildStatusPills,
+  buildStatuslineAttentionFocusText,
+  buildStatuslineAttentionRepresentatives,
   buildStatuslineRealtimeView,
   buildStatuslineSummary,
   buildTmuxAttentionPills,
   buildTmuxBadgeBar,
   buildTmuxBadgeSummary,
   buildTmuxIdleRightRail,
+  buildTmuxStatuslineAttentionPills,
   compactStatuslineDirLabel,
   cwdToProjectDirName,
   detectApprovalPromptPhase,
@@ -1285,89 +1288,304 @@ describe("buildAttentionItems", () => {
   });
 });
 
+describe("statusline attention projection", () => {
+  it("keeps permission, recent thinking/tool, and recent idle completion only", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "permission",
+          priority: 0,
+          pid: 10,
+          agentName: "Claude Code",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "permission",
+          lastActivityAt: now - 5,
+        },
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 11,
+          agentName: "Codex",
+          cwd: "/repo/think",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 10,
+        },
+        {
+          kind: "tool",
+          priority: 1,
+          pid: 12,
+          agentName: "Codex",
+          cwd: "/repo/tool",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 15,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 13,
+          agentName: "Claude Code",
+          cwd: "/repo/recent-done",
+          status: "Idle",
+          lastActivityAt: now - 30,
+          recentCompleteAt: now - 30,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 14,
+          agentName: "Claude Code",
+          cwd: "/repo/old-idle",
+          status: "Idle",
+          lastActivityAt: now - 900,
+          idleSince: now - 900,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 15,
+          agentName: "Codex",
+          cwd: "/repo/live-active",
+          status: "Active",
+          lastActivityAt: now - 20,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid]),
+      [
+        ["permission", 10],
+        ["thinking", 11],
+        ["tool", 12],
+        ["active", 13],
+      ],
+    );
+  });
+
+  it("collapses duplicate recent idle completions by repo label", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "active",
+          priority: 2,
+          pid: 20,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 30,
+          recentCompleteAt: now - 30,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 21,
+          agentName: "Codex",
+          cwd: "/Users/macrent/side/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 40,
+          recentCompleteAt: now - 40,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.equal(representatives.length, 1);
+    assert.equal(representatives[0].pid, 20);
+    assert.equal(representatives[0].collapsedCount, 1);
+    assert.match(representatives[0].label, /^roam-new \+1$/);
+  });
+
+  it("renders tmux and plain statusline focus from the projected representatives", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const items = [
+      {
+        kind: "permission",
+        priority: 0,
+        pid: 30,
+        agentName: "Claude Code",
+        cwd: "/repo/marmonitor",
+        status: "Active",
+        phase: "permission",
+        lastActivityAt: now - 5,
+      },
+      {
+        kind: "active",
+        priority: 2,
+        pid: 31,
+        agentName: "Codex",
+        cwd: "/Users/macrent/work/roam-new",
+        status: "Idle",
+        lastActivityAt: now - 20,
+        recentCompleteAt: now - 20,
+      },
+      {
+        kind: "active",
+        priority: 2,
+        pid: 32,
+        agentName: "Claude Code",
+        cwd: "/Users/macrent/side/roam-new",
+        status: "Idle",
+        lastActivityAt: now - 25,
+        recentCompleteAt: now - 25,
+      },
+    ];
+
+    assert.equal(
+      buildStatuslineAttentionFocusText(items, 5, 200, { nowSec: now }),
+      "⏳Cl marmonitor allow │ Cx roam-new +1 20s",
+    );
+    assert.match(
+      buildTmuxStatuslineAttentionPills(items, 5, 200, "plain", { nowSec: now }) ?? "",
+      /#\[range=user\|pid:30]1 ⏳Cl marmonitor allow#\[norange] {2}#\[range=user\|pid:31]2 Cx roam-new \+1 20s#\[norange]/,
+    );
+  });
+});
+
 describe("idle right rail", () => {
   it("accepts only reusable Claude/Codex idle sessions", () => {
+    const now = Math.floor(Date.now() / 1000);
     assert.equal(
-      isIdleRightRailCandidate({
-        pid: 10,
-        agentName: "Claude Code",
-        cwd: "/repo/a",
-        status: "Idle",
-      }),
+      isIdleRightRailCandidate(
+        {
+          pid: 10,
+          agentName: "Claude Code",
+          cwd: "/repo/a",
+          status: "Idle",
+          idleSince: now - 10 * 60,
+        },
+        { nowSec: now },
+      ),
       true,
     );
     assert.equal(
-      isIdleRightRailCandidate({
-        pid: 11,
-        agentName: "Codex",
-        cwd: "/repo/b",
-        status: "Idle",
-      }),
+      isIdleRightRailCandidate(
+        {
+          pid: 11,
+          agentName: "Codex",
+          cwd: "/repo/b",
+          status: "Idle",
+          idleSince: now - 20 * 60,
+        },
+        { nowSec: now },
+      ),
       true,
     );
     assert.equal(
-      isIdleRightRailCandidate({
-        pid: 12,
-        agentName: "Gemini",
-        cwd: "/repo/c",
-        status: "Idle",
-      }),
+      isIdleRightRailCandidate(
+        {
+          pid: 12,
+          agentName: "Gemini",
+          cwd: "/repo/c",
+          status: "Idle",
+        },
+        { nowSec: now },
+      ),
       false,
     );
     assert.equal(
-      isIdleRightRailCandidate({
-        pid: 13,
-        agentName: "Claude Code",
-        cwd: "/repo/d",
-        status: "Idle",
-        phase: "thinking",
-      }),
+      isIdleRightRailCandidate(
+        {
+          pid: 13,
+          agentName: "Claude Code",
+          cwd: "/repo/d",
+          status: "Idle",
+          phase: "thinking",
+          idleSince: now - 10 * 60,
+        },
+        { nowSec: now },
+      ),
       false,
     );
     assert.equal(
-      isIdleRightRailCandidate({
-        pid: 14,
-        agentName: "Codex",
-        cwd: "/repo/e",
-        status: "Stalled",
-      }),
+      isIdleRightRailCandidate(
+        {
+          pid: 14,
+          agentName: "Codex",
+          cwd: "/repo/e",
+          status: "Stalled",
+        },
+        { nowSec: now },
+      ),
+      false,
+    );
+    assert.equal(
+      isIdleRightRailCandidate(
+        {
+          pid: 15,
+          agentName: "Codex",
+          cwd: "/repo/f",
+          status: "Idle",
+          recentCompleteAt: now - 30,
+          idleSince: now - 30,
+        },
+        { nowSec: now },
+      ),
+      false,
+    );
+    assert.equal(
+      isIdleRightRailCandidate(
+        {
+          pid: 16,
+          agentName: "Codex",
+          cwd: "/repo/g",
+          status: "Idle",
+          idleSince: now - 2 * 60 * 60,
+        },
+        { nowSec: now },
+      ),
       false,
     );
   });
 
   it("selects and sorts idle sessions with disambiguated labels", () => {
     const now = Math.floor(Date.now() / 1000);
-    const snapshot = selectIdleSessionsForRightRail([
-      {
-        pid: 30,
-        agentName: "Codex",
-        cwd: "/Users/macrent/work/marmonitor",
-        status: "Idle",
-        lastActivityAt: now - 30,
-      },
-      {
-        pid: 31,
-        agentName: "Claude Code",
-        cwd: "/Users/macrent/side/marmonitor",
-        status: "Idle",
-        lastActivityAt: now - 10,
-      },
-      {
-        pid: 32,
-        agentName: "Codex",
-        cwd: "/Users/macrent/work/roam-new",
-        status: "Idle",
-        lastActivityAt: now - 20,
-      },
-      {
-        pid: 33,
-        agentName: "Claude Code",
-        cwd: "/Users/macrent/work/fmbattle",
-        status: "Active",
-        phase: "tool",
-        lastActivityAt: now - 5,
-      },
-    ]);
+    const snapshot = selectIdleSessionsForRightRail(
+      [
+        {
+          pid: 30,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/marmonitor",
+          status: "Idle",
+          lastActivityAt: now - 30,
+          idleSince: now - 10 * 60,
+        },
+        {
+          pid: 31,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/side/marmonitor",
+          status: "Idle",
+          lastActivityAt: now - 10,
+          idleSince: now - 8 * 60,
+        },
+        {
+          pid: 32,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 20,
+          idleSince: now - 9 * 60,
+        },
+        {
+          pid: 33,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/fmbattle",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 5,
+        },
+      ],
+      { nowSec: now },
+    );
 
     assert.equal(snapshot.total, 3);
     assert.equal(snapshot.claudeCount, 1);
@@ -1478,6 +1696,7 @@ describe("buildStatuslineRealtimeView", () => {
           cpuPercent: 0,
           memoryMb: 100,
           lastActivityAt: now - 20,
+          idleSince: now - 10 * 60,
         },
         {
           pid: 13,

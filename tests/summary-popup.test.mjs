@@ -75,6 +75,7 @@ describe("summary popup item selection", () => {
       cwd: "/repo/claude-idle",
       status: "Idle",
       lastActivityAt: nowSec - 40,
+      idleSince: nowSec - 10 * 60,
     },
     {
       pid: 30,

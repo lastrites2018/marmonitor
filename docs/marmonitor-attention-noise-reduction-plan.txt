@@ -1,0 +1,352 @@
+attention noise 축소 계획
+
+진행 상태
+- 2026-04-01: 1차 subset 반영
+  - popup / jump / watch가 쓰는 원본 attention 후보는 유지
+  - statusline 왼쪽 detail만 별도 projection을 사용
+  - `permission`, 최근 `thinking`, 최근 `tool`, 최근 `Idle` 완료 근사치만 유지
+  - 최근 `Idle` 완료 근사치는 같은 repo label끼리 collapse
+  - 현재 snapshot에는 직전 phase 이력이 없으므로, `recent-complete`는 "최근 활동이 있었던 Idle 세션"으로 근사
+  - `warm-idle` / `cold-idle`에 따른 right rail 재조정은 후속 과제로 남김
+- 2026-04-01: 구간 모델 명확화
+  - active decay 중심 설명 대신 `recent-complete / warm-idle / cold-idle` 구간 모델을 기준으로 본다.
+  - 기본 정책값은 아래를 사용한다.
+    - `recent-complete <= 5분`
+    - `warm-idle > 5분 && < 1시간`
+    - `cold-idle >= 1시간`
+  - 다만 진짜 중요한 기준은 "몇 분인가"보다 "어떤 이벤트를 기준으로 그 시간을 재는가"이다.
+
+목적
+- statusline 하단 왼쪽 attention 영역이 "지금 바로 대응해야 할 것"만 보여주도록 더 보수적으로 정제한다.
+- popup / jump / watch가 가진 전체 탐색 능력은 유지하고, statusline surface에만 노이즈 필터를 강화한다.
+- 새 스캔 없이 현재 collector light snapshot과 기존 `AgentSession[]`만으로 처리한다.
+
+왜 지금 필요한가
+- summary popup은 이미 동작한다.
+- idle right rail도 이미 구현되었다.
+- 따라서 현재 UX의 병목은 "기능 부족"보다 "왼쪽 attention 영역에 방금 끝난 세션, 곧 다시 쓸 수 있는 세션, 오래 방치된 세션이 충분히 구분되지 않는 것"이다.
+
+현재 코드 기준 문제
+
+현 상태
+- `buildAttentionItems()`는 permission / recent thinking만 tier1이다.
+- 나머지 alive 세션은 모두 tier2로 들어간다.
+- tier2는 최근 활동 순으로 정렬된다.
+
+결과
+- 최근성이 낮은 plain active도 top N에 남을 수 있다.
+- 방금 작업이 끝난 세션과 그냥 오래 idle인 세션이 같은 층으로 보일 수 있다.
+- 같은 repo의 세션이 여러 개 나란히 top N에 뜰 수 있다.
+- statusline left rail의 의미가 "urgent now"보다 "그냥 최근에 살아 있음"에 가까워질 수 있다.
+
+핵심 원칙
+- popup / jump / watch의 원본 attention 후보는 줄이지 않는다.
+- statusline 하단 왼쪽 detail에만 별도 projection을 적용한다.
+- 새 스캔 금지
+- 새 외부 캐시 금지
+- collector snapshot only
+- 규칙은 설명 가능해야 한다.
+
+비목표
+- popup chooser 결과를 줄이는 것
+- summary badge 숫자를 바꾸는 것
+- idle right rail을 다시 설계하는 것
+- CPU/memory 같은 새 시그널을 추가하는 것
+
+권장 설계
+
+1. 원본 attention과 statusline attention을 분리한다
+
+현재 상태
+- `buildAttentionItems()`가 popup / jump / statusline에서 사실상 공용 의미를 가진다.
+
+권장 방향
+- 원본 attention 후보:
+  - 지금처럼 유지
+  - popup / jump / watch가 사용
+- statusline projection:
+  - `buildStatuslineAttentionItems()` 또는 동등한 얇은 파생 함수를 추가
+  - `buildAttentionItems()`의 결과를 받아 statusline 전용으로 다시 필터링 / dedupe / 정렬
+
+왜 이렇게 해야 하나
+- statusline은 얇은 요약 surface다.
+- popup / jump는 탐색 surface다.
+- 둘의 정보 밀도 요구가 다르다.
+
+Simple Made Easy 기준 경계
+- 원본 attention: 권위 데이터
+- statusline top-N: 파생 projection
+
+2. statusline 전용 상태 구간 재정의
+
+1차 규칙
+
+2-1. permission은 무조건 유지
+- `kind === permission`
+- 무조건 top 영역 유지
+
+2-2. recent thinking / recent tool은 유지
+- 현재 규칙과 동일
+- 최근성 조건은 유지
+- 이 범주는 statusline에 남아야 한다.
+
+2-3. `recent-complete`를 별도 층으로 만든다
+- 단순 active 대신 "방금 끝난 세션"을 분리해서 보여준다.
+- 권장 정의:
+  - 현재 `status === "Idle"`
+  - 직전 의미 있는 상태가 `thinking` 또는 `tool`
+  - 최근 완료 시각이 `<= 5분`
+- 기본값:
+  - `recentCompleteMaxAgeSec = 300`
+- 이 상태는 왼쪽 top detail에 남는다.
+- 중요:
+  - 단순히 `lastActivityAt <= 5분`으로 판정하면 안 된다.
+  - `recent-complete`는 "최근에 반응이 있었던 idle"이 아니라, `thinking/tool -> idle` 전환이 최근에 있었던 세션이어야 한다.
+  - 현재 snapshot 모델에 직전 phase 또는 전이 시각이 없으면, 이 분류는 근사치일 뿐이며 의미적으로는 완전하지 않다.
+  - 전이 정보가 없는 상태에서는 과한 추정보다 보수적 누락이 더 낫다.
+
+2-4. `warm-idle`은 오른쪽 rail 전용으로 본다
+- `Idle` 상태이지만, 너무 오래 방치되지는 않은 세션이다.
+- 권장 정의:
+  - `status === "Idle"`
+  - `recent-complete`에는 해당하지 않음
+  - idle 또는 최근 activity 기준 경과 시간이 `> 5분 && < 1시간`
+- 기본값:
+  - `warmIdleMinAgeSec = 301`
+  - `warmIdleMaxAgeSec = 3599`
+- 이 상태는 오른쪽 idle rail에 남기되, 왼쪽 top detail에서는 제외하는 것이 권장된다.
+- 중요:
+  - right rail 목적은 "지금 다시 투입 가능한 세션"을 보여주는 것이다.
+  - 따라서 이상적인 정렬 기준은 `lastActivityAt`이 아니라 `idle entered at`, 즉 idle 전환 시각이다.
+  - 현재 모델에 idle 진입 시각이 없으면 1차 구현은 `lastActivityAt`로 대체할 수 있지만, 두 값의 의미가 같다고 보면 안 된다.
+
+2-5. `cold-idle`은 statusline surface에서 제외한다
+- `Idle` 상태이고 1시간 이상 지난 세션이다.
+- popup이나 전체 inventory에는 남길 수 있지만, left / right rail에서는 제외하는 것이 맞다.
+- 기본값:
+  - `coldIdleMinAgeSec = 3600`
+
+구간별 역할 요약
+- 왼쪽 rail:
+  - `permission`
+  - 최근 `thinking`
+  - 최근 `tool`
+  - `recent-complete`
+- 오른쪽 rail:
+  - `warm-idle`
+- popup / inventory:
+  - `cold-idle` 포함 가능
+
+2-6. 같은 short label의 `recent-complete` 중복은 statusline에서 1개만 유지할 수 있다
+- 같은 repo/folder label의 `recent-complete`가 여러 개면 가장 최근 것 하나만 남긴다.
+- 중복 수는 suffix로 표시할 수 있다.
+  - 예: `roam-new +2`
+- 1차에서는 `recent-complete`에만 적용하는 것이 안전하다.
+- permission / thinking / tool은 중복이더라도 그대로 두는 편이 맞다.
+
+2-7. top N은 "대표 항목" 중심으로 채운다
+- top N을 raw session이 아니라 statusline representative item으로 채운다.
+- 즉, 중복 label collapse 후의 item 집합에서 N개를 고른다.
+
+3. 정렬 규칙
+
+권장 정렬 우선순위
+1. permission
+2. recent thinking
+3. recent tool
+4. recent-complete representative
+
+동순위 정렬
+1. 최근 활동 시각 desc
+2. agent name asc
+3. pid asc
+
+주의
+- 이 변경은 `warm-idle`과 `cold-idle`을 왼쪽 statusline top detail에서 제거하는 효과가 있다.
+- popup / jump ordering까지 같이 바꾸지 말고, 먼저 statusline projection에만 적용하는 것이 안전하다.
+- 이 구분은 단순 렌더 규칙이 아니라, 상태 전이 정보를 얼마나 공용 상태에 유지할 것인가의 문제와 연결된다.
+- collector 재시작이나 snapshot 교체 시 전이 정보가 끊기면 `recent-complete` 판정이 흔들릴 수 있다.
+- 따라서 장기적으로는 projection 규칙뿐 아니라 최소 이력 필드를 snapshot에 포함하는 방향을 같이 봐야 한다.
+
+4. 중복 collapse 규칙
+
+기본 단위
+- short label 기준
+- 예:
+  - `roam-new`
+  - `marmonitor`
+
+1차 적용 대상
+- `recent-complete`만
+
+1차 collapse 결과 형식
+- 대표 item 하나 유지
+- 나머지 개수는 suffix
+  - `roam-new +2`
+
+대표 item 선정
+- 같은 label의 `recent-complete` 중:
+  - 최근 활동이 가장 최신
+  - tie-breaker는 agent name, pid
+
+왜 `recent-complete`만 대상으로 하나
+- permission / thinking / tool은 각 세션 자체가 의미가 더 강하다.
+- `warm-idle`은 이미 오른쪽 rail에서 inventory 역할을 맡는다.
+- 왼쪽 rail에서 실제 noise가 되는 건 "방금 끝난 유사 세션 묶음"일 가능성이 높다.
+
+5. 렌더 규칙
+
+현재 목표
+- 렌더는 더 화려하게 만들지 않는다.
+- 현재 plain/minimal/pill 스타일 체계를 그대로 둔다.
+
+표시 예시
+- 전:
+  - `1 🤔Cx marmonitor 3s  2 Cl roam-new 2m  3 Cl roam-new 4m`
+- 후:
+  - `1 🤔Cx marmonitor 3s  2 Cl roam-new +1 2m`
+
+권장 형식
+- suffix는 짧게
+  - `+1`
+  - `+2`
+- 같은 폭에서 정보를 더 많이 담되, 정렬은 기존과 비슷하게 유지
+
+6. 구체 함수 분리 제안
+
+권장 순수 모델
+
+```ts
+type StatuslineAttentionRepresentative = {
+  kind: AttentionKind;
+  pid: number;
+  agentName: string;
+  cwd: string;
+  label: string;
+  lastAt: number;
+  collapsedCount: number;
+  status: AgentSession["status"];
+  phase: AgentSession["phase"];
+};
+```
+
+권장 함수
+
+```ts
+function shouldKeepAttentionForStatusline(
+  item: AttentionItem,
+  options?: {
+    nowSec?: number;
+    recentCompleteMaxAgeSec?: number;
+    warmIdleMinAgeSec?: number;
+    warmIdleMaxAgeSec?: number;
+  },
+): boolean;
+
+function collapseStatuslineAttentionDuplicates(
+  items: AttentionItem[],
+  labels: string[],
+): StatuslineAttentionRepresentative[];
+
+function buildStatuslineAttentionRepresentatives(
+  items: AttentionItem[],
+  options?: StatuslineAttentionOptions,
+): StatuslineAttentionRepresentative[];
+```
+
+삽입 지점
+- `src/output/utils.ts`
+  - selection / decay / collapse 순수 함수
+- `src/output/index.ts`
+  - existing statusline detail rendering에서 raw `AttentionItem[]` 대신 representative list 사용
+
+권장 구현 순서
+1. `buildAttentionItems()`는 그대로 둔다
+2. statusline 전용 projection 함수 추가
+3. `tmux-badges` detail render만 projection 사용
+4. 필요하면 compact/plain text 경로로 확장
+
+7. 수용 기준
+
+필수
+- permission은 기존처럼 상단 유지
+- recent thinking / tool은 계속 잘 보임
+- recent-complete는 5분 동안만 왼쪽 top detail 후보로 남음
+- warm-idle은 오른쪽 rail에만 남고 왼쪽에서는 빠짐
+- cold-idle은 statusline surface에서 빠짐
+- 같은 repo recent-complete 중복은 statusline에서 줄어듦
+- popup / jump는 기존과 동일하게 더 많은 원본 후보를 유지
+- 새 스캔 없음
+
+반드시 피해야 할 것
+- popup item 개수까지 줄어드는 것
+- summary badge 숫자가 바뀌는 것
+- permission / recent thinking이 dedupe되어 사라지는 것
+- `recent-complete` collapse 때문에 실제 jump 대상이 모호해지는 것
+- idle rail과 left rail이 같은 세션을 동시에 반복 노출하는 것
+
+8. 테스트 계획
+
+단위 테스트
+- `recent-complete`는 `thinking/tool -> idle` 전환이 5분 이내일 때만 유지
+- `warm-idle`은 idle 전환 기준 `> 5분 && < 1시간`일 때 오른쪽 rail 후보
+- `cold-idle`은 idle 전환 기준 `>= 1시간`일 때 statusline에서 제외
+- permission은 age와 무관하게 유지
+- recent thinking / tool은 유지
+- 같은 label의 `recent-complete`는 하나로 collapse
+- 대표 item은 가장 최근 `recent-complete`가 선택
+- `collapsedCount`가 올바름
+- collapse는 `recent-complete`에만 적용
+
+회귀 테스트
+- popup selection은 기존 개수 유지
+- jump selection은 기존 개수 유지
+- summary badge count 회귀 없음
+
+시각 테스트
+- `tmux-badges` top detail에서
+  - 같은 repo 중복이 줄어드는지
+  - 오래된 active가 빠지는지
+  - left rail 길이가 과도하게 변하지 않는지
+
+9. 기본값 제안
+
+기본 파라미터
+- `recentCompleteMaxAgeSec = 5 * 60`
+- `warmIdleMinAgeSec = 5 * 60 + 1`
+- `warmIdleMaxAgeSec = 60 * 60 - 1`
+- collapse 대상:
+  - recent-complete only
+- top N:
+  - 현재 limit 유지
+
+왜 이 값인가
+- 5분 이내는 "방금 끝남"으로 받아들이기 쉽다.
+- 5분 초과~1시간 미만은 "다시 투입 가능한 idle"로 보기 적당하다.
+- 1시간 이상은 statusline보다 popup/inventory에 두는 것이 맞다.
+
+10. 롤아웃 순서
+
+1차
+- statusline projection 도입
+- recent-complete / warm-idle / cold-idle projection 추가
+- recent-complete duplicate collapse 추가
+
+2차
+- snapshot 또는 파생 상태에 최소 전이 필드 도입
+  - 직전 의미 있는 phase
+  - recent complete 시각
+  - idle 진입 시각
+- 실제 사용에서 warm-idle이 너무 많으면 right rail limit/정렬 조정
+- 필요하면 `recent-complete` 표식이나 문구 조정
+
+3차
+- 실제 사용 후 label grouping 표현 개선 여부 판단
+
+메타 결론
+- attention noise 축소는 새 기능 추가가 아니라, 이미 구현된 statusline / popup / idle 구조 위에서 왼쪽 rail의 역할을 더 선명하게 만드는 작업이다.
+- 핵심은 원본 attention 후보를 훼손하지 않고, statusline surface에만
+  - `recent-complete`
+  - `warm-idle`
+  - `cold-idle`
+  구간을 도입해 역할을 선명하게 나누는 것이다.

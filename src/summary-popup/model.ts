@@ -111,7 +111,7 @@ export function buildSummaryPopupSelections(
       attentionKinds,
     ),
     idle: orderedSummaryItems(
-      agents.filter((agent) => isIdleRightRailCandidate(agent)),
+      agents.filter((agent) => isIdleRightRailCandidate(agent, { nowSec: options.nowSec })),
       attentionKinds,
     ),
     "phase:permission": orderedSummaryItems(
