@@ -1232,13 +1232,13 @@ describe("buildAttentionItems", () => {
     assert.match(text, //);
   });
 
-  it("shows no active when no attention items exist", () => {
+  it("shows no focus when no attention items exist", () => {
     const text = buildTmuxAttentionPills([], 5);
-    assert.match(text, /no active/);
+    assert.match(text, /no focus/);
     assert.doesNotMatch(text, /all ok/);
   });
 
-  it("shows no active when only unmatched/stalled items exist", () => {
+  it("shows no focus when only unmatched/stalled items exist", () => {
     const text = buildTmuxAttentionPills(
       [
         {
@@ -1260,7 +1260,7 @@ describe("buildAttentionItems", () => {
       ],
       5,
     );
-    assert.match(text, /no active/);
+    assert.match(text, /no focus/);
   });
 
   it("reduces tmux attention pills on narrow widths", () => {
@@ -1502,6 +1502,46 @@ describe("statusline attention projection", () => {
         ["thinking", 42],
         ["tool", 43],
         ["active", 45],
+      ],
+    );
+  });
+
+  it("falls back to the most recent active sessions when no immediate or recent-complete items exist", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "active",
+          priority: 2,
+          pid: 60,
+          agentName: "Codex",
+          cwd: "/repo/current-session",
+          status: "Active",
+          phase: "done",
+          lastActivityAt: now - 2,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 61,
+          agentName: "Claude Code",
+          cwd: "/repo/second-session",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 15,
+          idleSince: now - 15,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid, item.label]),
+      [
+        ["active", 60, "current-session"],
+        ["active", 61, "second-session"],
       ],
     );
   });
@@ -1824,10 +1864,10 @@ describe("idle right rail", () => {
 
     assert.equal(
       buildIdleRightRail(snapshot, 220, 200),
-      "idle Cl2 Cx3 | marmonitor 1m · roam-new 2m · fmbattle 3m · ghostty 4m · vos-proto 5m",
+      "warm Cl2 Cx3 | marmonitor 1m · roam-new 2m · fmbattle 3m · ghostty 4m · vos-proto 5m",
     );
-    assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle Cl2 Cx3");
-    assert.equal(buildIdleRightRail(snapshot, 130, 7), "idle 5");
+    assert.equal(buildIdleRightRail(snapshot, 130, 20), "warm Cl2 Cx3");
+    assert.equal(buildIdleRightRail(snapshot, 130, 7), "warm 5");
     assert.equal(buildIdleRightRail(snapshot, 80, 80), undefined);
     assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
   });
@@ -1840,7 +1880,7 @@ describe("idle right rail", () => {
       entries: [],
     };
 
-    assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle -");
+    assert.equal(buildIdleRightRail(snapshot, 130, 20), "warm -");
     assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
   });
 
@@ -1858,15 +1898,15 @@ describe("idle right rail", () => {
 
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 220, 200),
-      "#[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:1]marmonitor 1m#[norange] · #[range=user|pid:2]roam-new 2m#[norange]",
+      "#[range=user|sum:idle]warm Cl1 Cx1#[norange] | #[range=user|pid:1]marmonitor 1m#[norange] · #[range=user|pid:2]roam-new 2m#[norange]",
     );
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 130, 20),
-      "#[range=user|sum:idle]idle Cl1 Cx1#[norange]",
+      "#[range=user|sum:idle]warm Cl1 Cx1#[norange]",
     );
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 130, 7),
-      "#[range=user|sum:idle]idle 2#[norange]",
+      "#[range=user|sum:idle]warm 2#[norange]",
     );
   });
 
@@ -1880,14 +1920,14 @@ describe("idle right rail", () => {
 
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 130, 20),
-      "#[range=user|sum:idle]idle -#[norange]",
+      "#[range=user|sum:idle]warm -#[norange]",
     );
   });
 
   it("joins left and right rails without counting tmux markup in visible width", () => {
     const left =
       "#[range=user|sum:codex]Cx 3#[norange]  #[range=user|pid:10]1 Cx repo 5s#[norange]";
-    const right = "idle Cl1 Cx2";
+    const right = "warm Cl1 Cx2";
     assert.equal(visibleTextWidth(left), "Cx 3  1 Cx repo 5s".length);
     assert.equal(
       joinLeftAndRightRail(left, right, visibleTextWidth(left) + visibleTextWidth(right) + 4),

@@ -71,7 +71,7 @@ describe("renderStatusline idle right rail", () => {
     });
     assert.match(
       text,
-      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor 11m#\[norange] · #\[range=user\|pid:11]roam-new 20m#\[norange]$/,
+      /#\[range=user\|sum:idle]warm Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor 11m#\[norange] · #\[range=user\|pid:11]roam-new 20m#\[norange]$/,
     );
   });
 
@@ -79,7 +79,7 @@ describe("renderStatusline idle right rail", () => {
     const text = await renderStatusline(agents, "tmux-badges", 5, 80, {
       tmuxBadgeStyle: "plain",
     });
-    assert.doesNotMatch(text, /\bidle\b/);
+    assert.doesNotMatch(text, /\bwarm\b/);
   });
 
   it("shows an empty idle marker when wide enough but there are no warm-idle candidates", async () => {
@@ -125,7 +125,7 @@ describe("renderStatusline idle right rail", () => {
         tmuxBadgeStyle: "plain",
       },
     );
-    assert.match(text, /#\[range=user\|sum:idle]idle -#\[norange]$/);
+    assert.match(text, /#\[range=user\|sum:idle]warm -#\[norange]$/);
   });
 
   it("keeps one recent-complete item visible on the left rail within its retention window", async () => {

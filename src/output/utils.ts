@@ -722,6 +722,10 @@ function buildIdleRightRailCounts(snapshot: IdleRightRailSnapshot): string[] {
   return parts;
 }
 
+const STATUSLINE_EMPTY_FOCUS_LABEL = "no focus";
+const WARM_IDLE_RAIL_PREFIX = "warm";
+const WARM_IDLE_EMPTY_LABEL = `${WARM_IDLE_RAIL_PREFIX} -`;
+
 type IdleRightRailVariant =
   | { kind: "full"; countLabel: string; names: IdleRightRailEntry[] }
   | { kind: "compact"; countLabel: string }
@@ -742,7 +746,9 @@ function resolveIdleRightRailVariant(
     return undefined;
   }
   if (snapshot.total === 0) {
-    return visibleTextWidth("idle -") <= availableWidth ? { kind: "empty" } : undefined;
+    return visibleTextWidth(WARM_IDLE_EMPTY_LABEL) <= availableWidth
+      ? { kind: "empty" }
+      : undefined;
   }
 
   const countParts = buildIdleRightRailCounts(snapshot);
@@ -751,10 +757,10 @@ function resolveIdleRightRailVariant(
   const names = snapshot.entries.slice(0, nameLimit);
   const fullPlain =
     names.length > 0
-      ? `idle ${countLabel} | ${names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`
-      : `idle ${countLabel}`;
-  const compactPlain = `idle ${countLabel}`;
-  const minimalPlain = `idle ${snapshot.total}`;
+      ? `${WARM_IDLE_RAIL_PREFIX} ${countLabel} | ${names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`
+      : `${WARM_IDLE_RAIL_PREFIX} ${countLabel}`;
+  const compactPlain = `${WARM_IDLE_RAIL_PREFIX} ${countLabel}`;
+  const minimalPlain = `${WARM_IDLE_RAIL_PREFIX} ${snapshot.total}`;
 
   if (visibleTextWidth(fullPlain) <= availableWidth) {
     return { kind: "full", countLabel, names };
@@ -776,15 +782,15 @@ export function buildIdleRightRail(
   const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
   if (!variant) return undefined;
   if (variant.kind === "empty") {
-    return "idle -";
+    return WARM_IDLE_EMPTY_LABEL;
   }
   if (variant.kind === "minimal") {
-    return `idle ${snapshot.total}`;
+    return `${WARM_IDLE_RAIL_PREFIX} ${snapshot.total}`;
   }
   if (variant.kind === "compact") {
-    return `idle ${variant.countLabel}`;
+    return `${WARM_IDLE_RAIL_PREFIX} ${variant.countLabel}`;
   }
-  return `idle ${variant.countLabel} | ${variant.names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`;
+  return `${WARM_IDLE_RAIL_PREFIX} ${variant.countLabel} | ${variant.names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`;
 }
 
 export function makeTmuxSummaryRange(target: SummaryPopupTarget, content: string): string {
@@ -799,16 +805,16 @@ export function buildTmuxIdleRightRail(
   const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
   if (!variant) return undefined;
   if (variant.kind === "empty") {
-    return makeTmuxSummaryRange("idle", "idle -");
+    return makeTmuxSummaryRange("idle", WARM_IDLE_EMPTY_LABEL);
   }
   if (variant.kind === "minimal") {
-    return makeTmuxSummaryRange("idle", `idle ${snapshot.total}`);
+    return makeTmuxSummaryRange("idle", `${WARM_IDLE_RAIL_PREFIX} ${snapshot.total}`);
   }
   if (variant.kind === "compact") {
-    return makeTmuxSummaryRange("idle", `idle ${variant.countLabel}`);
+    return makeTmuxSummaryRange("idle", `${WARM_IDLE_RAIL_PREFIX} ${variant.countLabel}`);
   }
 
-  const summary = makeTmuxSummaryRange("idle", `idle ${variant.countLabel}`);
+  const summary = makeTmuxSummaryRange("idle", `${WARM_IDLE_RAIL_PREFIX} ${variant.countLabel}`);
   const names = variant.names
     .map((entry) => tmuxUserRange(`pid:${entry.pid}`, formatIdleRightRailEntry(entry)))
     .join(" · ");
@@ -1026,7 +1032,25 @@ export function buildStatuslineAttentionRepresentatives(
   const selectedImmediate = immediate.slice(0, immediateBudget);
   const recentCompleteBudget = Math.max(0, layout.itemCount - selectedImmediate.length);
   const selectedRecentComplete = recentComplete.slice(0, recentCompleteBudget);
-  const rawItems = [...selectedImmediate, ...selectedRecentComplete];
+  let rawItems = [...selectedImmediate, ...selectedRecentComplete];
+  if (rawItems.length === 0) {
+    const fallbackItems = orderedAttentionItems(items)
+      .filter((item): item is AttentionItem & { kind: "active" } => item.kind === "active")
+      .slice(0, layout.itemCount);
+    const fallbackLabels = buildStatuslinePathLabels(fallbackItems, layout.pathMaxLength);
+    rawItems = fallbackItems.map((item, index) => ({
+      kind: item.kind,
+      pid: item.pid,
+      agentName: item.agentName,
+      cwd: item.cwd,
+      label: fallbackLabels[index] ?? compactStatuslineDirLabel(item.cwd, layout.pathMaxLength),
+      lastAt: attentionActivityTime(item),
+      collapsedCount: 0,
+      status: item.status,
+      phase: item.phase,
+      recentComplete: false,
+    }));
+  }
   if (rawItems.length === 0) return [];
 
   const unresolved = rawItems.filter((item) => item.kind !== "active");
@@ -1365,10 +1389,10 @@ export function buildTmuxAttentionPills(
 
   if (jumpItems.length === 0) {
     return style === "pill"
-      ? tmuxDetailBlock("no active")
+      ? tmuxDetailBlock(STATUSLINE_EMPTY_FOCUS_LABEL)
       : style === "minimal"
-        ? tmuxTextAccent("no active", "#bac2de")
-        : "no active";
+        ? tmuxTextAccent(STATUSLINE_EMPTY_FOCUS_LABEL, "#bac2de")
+        : STATUSLINE_EMPTY_FOCUS_LABEL;
   }
 
   const segments = jumpItems.map((item, index) => {
@@ -1416,10 +1440,10 @@ export function buildTmuxStatuslineAttentionPills(
   const jumpItems = buildStatuslineAttentionRepresentatives(items, maxCount, width, options);
   if (jumpItems.length === 0) {
     return style === "pill"
-      ? tmuxDetailBlock("no active")
+      ? tmuxDetailBlock(STATUSLINE_EMPTY_FOCUS_LABEL)
       : style === "minimal"
-        ? tmuxTextAccent("no active", "#bac2de")
-        : "no active";
+        ? tmuxTextAccent(STATUSLINE_EMPTY_FOCUS_LABEL, "#bac2de")
+        : STATUSLINE_EMPTY_FOCUS_LABEL;
   }
 
   const segments = jumpItems.map((item, index) => {

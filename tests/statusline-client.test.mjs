@@ -78,20 +78,20 @@ describe("statusline client", () => {
   it("adds a second jump-back indicator immediately before the idle rail", () => {
     assert.equal(
       appendJumpBackIndicator(
-        "Cl 1 Cx 8  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]      #[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
+        "Cl 1 Cx 8  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]      #[range=user|sum:idle]warm Cl1 Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
         true,
       ),
-      "Cl 1 Cx 8  #[range=user|back]↩#[norange]  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]      #[range=user|back]↩#[norange]  #[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
+      "Cl 1 Cx 8  #[range=user|back]↩#[norange]  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]      #[range=user|back]↩#[norange]  #[range=user|sum:idle]warm Cl1 Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
     );
   });
 
   it("shows both jump-back indicators when only summary and idle rail are present", () => {
     assert.equal(
       appendJumpBackIndicator(
-        "Cx 1        #[range=user|sum:idle]idle Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
+        "Cx 1        #[range=user|sum:idle]warm Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
         true,
       ),
-      "Cx 1  #[range=user|back]↩#[norange]        #[range=user|back]↩#[norange]  #[range=user|sum:idle]idle Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
+      "Cx 1  #[range=user|back]↩#[norange]        #[range=user|back]↩#[norange]  #[range=user|sum:idle]warm Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
     );
   });
 
