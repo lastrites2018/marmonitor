@@ -114,9 +114,6 @@ export function buildSummaryPopupTmuxArgs(
     .join(" ");
 
   const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
-  if (targetClient) {
-    args.push("-c", targetClient);
-  }
   args.push(command);
   return args;
 }

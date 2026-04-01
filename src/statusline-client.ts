@@ -20,16 +20,40 @@ export type StatuslineClientOptions = {
 
 const TMUX_DETAIL_MARKER = "  #[range=user|pid:";
 const TMUX_BACK_RANGE = "#[range=user|back]↩#[norange]";
+const TMUX_IDLE_MARKER = "#[range=user|sum:idle]";
 
 export function appendJumpBackIndicator(output: string, hasAnchor: boolean): string {
   if (!hasAnchor) return output;
+  const idleIndex = output.indexOf(TMUX_IDLE_MARKER);
   const detailIndex = output.indexOf(TMUX_DETAIL_MARKER);
-  if (detailIndex === -1) {
-    return `${output}  ${TMUX_BACK_RANGE}`;
+
+  if (idleIndex === -1) {
+    if (detailIndex === -1) {
+      return `${output}  ${TMUX_BACK_RANGE}`;
+    }
+    const summary = output.slice(0, detailIndex);
+    const detail = output.slice(detailIndex);
+    return `${summary}  ${TMUX_BACK_RANGE}${detail}`;
   }
-  const summary = output.slice(0, detailIndex);
-  const detail = output.slice(detailIndex);
-  return `${summary}  ${TMUX_BACK_RANGE}${detail}`;
+
+  const beforeIdle = output.slice(0, idleIndex);
+  const right = output.slice(idleIndex);
+  const trimmedLeft = beforeIdle.trimEnd();
+  const gap = beforeIdle.slice(trimmedLeft.length) || "  ";
+  const rightWithBack = `${TMUX_BACK_RANGE}  ${right}`;
+
+  if (detailIndex === -1 || detailIndex >= idleIndex) {
+    return `${trimmedLeft}  ${TMUX_BACK_RANGE}${gap}${rightWithBack}`;
+  }
+
+  const detailRelativeIndex = trimmedLeft.indexOf(TMUX_DETAIL_MARKER);
+  if (detailRelativeIndex === -1) {
+    return `${trimmedLeft}  ${TMUX_BACK_RANGE}${gap}${rightWithBack}`;
+  }
+  const summary = trimmedLeft.slice(0, detailRelativeIndex);
+  const detail = trimmedLeft.slice(detailRelativeIndex);
+  const leftWithBack = `${summary}  ${TMUX_BACK_RANGE}${detail}`;
+  return `${leftWithBack}${gap}${rightWithBack}`;
 }
 
 export function parseStatuslineClientArgs(args: string[]): StatuslineClientOptions {

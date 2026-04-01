@@ -60,6 +60,10 @@ describe("status click helper", () => {
       kind: "summary",
       target: "agent:claude",
     });
+    assert.deepEqual(parseStatusClickTarget("sum:idle"), {
+      kind: "summary",
+      target: "idle",
+    });
     assert.deepEqual(parseStatusClickTarget("summary:agent:claude"), {
       kind: "summary",
       target: "agent:claude",
@@ -114,8 +118,7 @@ describe("status click helper", () => {
 
     assert.equal(args[0], "display-popup");
     assert.equal(args.includes("-E"), true);
-    assert.deepEqual(args.slice(1, 7), ["-E", "-w", "70%", "-h", "70%", "-c"]);
-    assert.equal(args[7], "/dev/ttys040");
+    assert.deepEqual(args.slice(1, 6), ["-E", "-w", "70%", "-h", "70%"]);
     assert.match(args.at(-1), /popup/);
     assert.match(args.at(-1), /--summary-target/);
     assert.match(args.at(-1), /--interactive/);

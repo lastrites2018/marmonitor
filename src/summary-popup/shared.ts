@@ -2,6 +2,7 @@ export type SummaryPopupTarget =
   | "agent:claude"
   | "agent:codex"
   | "agent:gemini"
+  | "idle"
   | "phase:permission"
   | "phase:thinking"
   | "phase:tool"
@@ -11,6 +12,7 @@ const VALID_SUMMARY_TARGETS = new Set<SummaryPopupTarget>([
   "agent:claude",
   "agent:codex",
   "agent:gemini",
+  "idle",
   "phase:permission",
   "phase:thinking",
   "phase:tool",
@@ -21,6 +23,7 @@ const RANGE_TO_TARGET: Record<string, SummaryPopupTarget> = {
   "sum:claude": "agent:claude",
   "sum:codex": "agent:codex",
   "sum:gemini": "agent:gemini",
+  "sum:idle": "idle",
   "sum:perm": "phase:permission",
   "sum:think": "phase:thinking",
   "sum:tool": "phase:tool",
