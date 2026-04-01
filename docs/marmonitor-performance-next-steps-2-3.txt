@@ -1,0 +1,291 @@
+marmonitor 성능 다음 단계 정리
+
+범위
+- 이 문서는 다음 두 축만 다룬다.
+  - 2. 실시간 경로의 공용 파생 모델 더 고정
+  - 3. popup / click helper 경계 더 정리
+- 목적은 새 기능을 더 붙이기 전에, 현재 surface가 다시 느려지거나 경계가 흐려지지 않게 하는 것이다.
+
+왜 지금 이 둘이 우선인가
+- 상태줄의 큰 병목은 이미 스캔보다 부트스트랩과 파생 조합 쪽으로 옮겨갔다.
+- 앞으로 성능을 다시 무너뜨릴 가능성이 큰 곳은 두 군데다.
+  - 상태줄에서 같은 의미를 여러 번 다시 계산하는 것
+  - 클릭 반응과 popup 진입 경로에 준실시간 해석이 흘러들어오는 것
+- 즉 지금 단계의 핵심은 "더 빨리 계산"이 아니라 "같은 계산을 한 번만 하고, 경계를 다시 두껍게 만들지 않는 것"이다.
+
+1. 실시간 경로의 공용 파생 모델 더 고정
+
+문제 정의
+- 상태줄은 공용 상태를 바탕으로 여러 의미를 동시에 보여준다.
+  - summary badge
+  - attention detail
+  - idle right rail
+  - jump-back 같은 client 고유 overlay
+- 이 의미들이 각자 따로 계산되기 시작하면, 기능이 늘수록 같은 정렬/필터/분류를 여러 번 반복하게 된다.
+- 이런 중복은 지금 당장은 작아 보여도, surface가 늘면 가장 먼저 hot path를 두껍게 만든다.
+
+목표
+- 상태줄에서 필요한 공용 의미를 한 번만 만들고 재사용한다.
+- 상태줄은 "원본 상태를 여러 번 해석하는 곳"이 아니라 "이미 만들어진 공용 파생 결과를 조합하는 곳"이어야 한다.
+
+무엇을 공용 파생 모델로 봐야 하는가
+- agent별 summary count
+- issue count
+- 정렬된 attention 후보
+- 상태줄 top detail 후보
+- idle bucket 분류
+  - recent-complete
+  - warm-idle
+  - cold-idle
+- right rail용 idle 목록
+
+무엇은 공용 파생 모델에 넣지 말아야 하는가
+- jump-back 가능 여부
+- 현재 client의 anchor 상태
+- 현재 클릭한 client 문맥
+- 현재 width에 따라만 달라지는 마지막 표현 조합
+
+핵심 원칙
+- 공용 파생 모델은 "여러 표면이 함께 써야 하는 의미"까지만 포함한다.
+- 표현은 그 위에 얹는다.
+- client 고유 상태는 마지막에 overlay로만 붙인다.
+- 상태줄 안에서 같은 의미를 두 번 계산하지 않는다.
+
+좋은 최종 상태
+- 상태줄은 아래 순서로 생각할 수 있어야 한다.
+  - 공용 상태
+  - 공용 파생 결과
+  - 상태줄 조합
+  - client overlay
+- 이 순서가 보이면, 새 기능이 들어와도 "어디에 넣어야 하는지"가 분명해진다.
+
+나쁜 방향
+- 상태줄 렌더 중간에서 popup용 정렬 규칙이 새로 생김
+- idle rail만 따로 다른 기준으로 후보를 다시 고름
+- 같은 summary 의미를 badge와 popup이 각자 다르게 해석함
+- client 고유 상태가 공용 파생 결과를 바꿈
+
+이번에 먼저 시도할 조각
+- summary popup이 같은 공용 파생을 한 번만 만들고 재사용하게 줄인다.
+- 범위는 준실시간 경로 안으로 제한한다.
+  - popup 대상 selection
+  - issue section 분리
+  - paged popup 계산
+- 상태줄 hot path는 건드리지 않는다.
+- 유지 기준
+  - summary popup micro benchmark가 실제로 좋아질 것
+  - collector mode warm / stale-served가 회귀하지 않을 것
+
+이번에 유지한 결과
+- `renderSummaryPopup(issue)` micro benchmark
+  - 변경 전: 약 `0.2912ms/op`
+  - 변경 후: 약 `0.2218ms/op`
+- `buildSummaryPopupPage(issue)`는 거의 동일 수준이었다.
+  - 변경 전: 약 `0.0739ms/op`
+  - 변경 후: 약 `0.0752ms/op`
+- `renderSummaryPopup(agent:codex)`는 약간 흔들렸지만, 준실시간 기준에서는 노이즈 범위에 가까웠다.
+- collector statusline 회귀 확인
+  - `warm`: 약 `40.5ms`
+  - `staleServed`: 약 `31.9ms`
+  - `forcedMiss`: 약 `31.6ms`
+- 결론
+  - 이 조각은 상태줄 hot path를 건드리지 않고, issue popup 경로만 의미 있게 줄였으므로 유지한다.
+
+2. popup / click helper 경계 더 정리
+
+문제 정의
+- popup과 click helper는 실시간 경로 바로 옆에 있다.
+- 여기에는 기능이 붙기 쉽다.
+  - summary click
+  - idle click
+  - direct jump
+  - jump-back
+  - empty-state message
+- 이 경계가 흐려지면, click 한 번에 준실시간 해석과 실시간 반응이 뒤섞인다.
+
+목표
+- click helper는 최대한 얇게 유지한다.
+- popup은 준실시간 경로로 남기되, 공용 상태와 공용 파생 결과를 소비하는 역할만 맡긴다.
+- 즉 "클릭 반응"과 "popup 내용 준비"를 분리한다.
+
+click helper가 해야 할 일
+- 클릭 대상 해석
+  - pid
+  - summary target
+  - back
+- 현재 client 문맥 전달
+- 분기
+  - direct jump
+  - popup 열기
+  - 짧은 상태 메시지
+
+click helper가 하지 말아야 할 일
+- 새 스캔 시작
+- 넓은 재정렬
+- popup 전용 독자 해석
+- collector가 이미 알고 있는 공용 상태를 다시 만들기
+
+popup이 해야 할 일
+- 공용 상태나 공용 파생 결과를 특정 관점으로 펼친다.
+- badge가 의미하는 대상을 설명한다.
+- 비어 있을 때도 사용자가 이해할 수 있는 메시지를 준다.
+
+popup이 하지 말아야 할 일
+- 상태줄과 다른 해석 규칙 만들기
+- 클릭 helper 안에서만 통하는 별도 분류 체계 만들기
+- "popup이니까 괜찮다"는 이유로 원천 수집을 다시 시작하기
+
+좋은 최종 상태
+- click helper는 빠른 라우터다.
+- popup은 공용 의미를 펼치는 뷰다.
+- 둘 사이에 역할 중복이 없다.
+
+나쁜 방향
+- summary click마다 어떤 badge는 jump, 어떤 badge는 popup, 어떤 badge는 상태 메시지를 주는데 기준이 설명되지 않음
+- idle rail click이 popup과 direct jump를 섞는데 규칙이 width나 표현에 따라 흔들림
+- click helper가 점점 "작은 컨트롤러"가 아니라 "축소된 애플리케이션"처럼 커짐
+
+3. 부작용 최소화 기준
+
+공용 파생 모델 정리에서 피해야 할 것
+- collector에 client 고유 상태를 밀어넣는 것
+- 상태줄 표현 규칙과 파생 상태 규칙을 한 함수에서 같이 다루는 것
+- 다른 표면에서 아직 쓰지 않는 계산을 "나중에 필요할지도 모른다"는 이유로 공용 파생에 미리 넣는 것
+
+popup / click helper 정리에서 피해야 할 것
+- direct file-read 같은 공격적 최적화로 바로 넘어가는 것
+- fallback semantics를 바꾸는 것
+- config path, client tty, width 같은 문맥을 파일 경로 계약으로 새어 나가게 하는 것
+
+유지해야 하는 계약
+- statusline과 일반 CLI의 의미가 드리프트하지 않아야 한다.
+- collector unavailable / stale fallback 의미가 유지돼야 한다.
+- client 고유 overlay는 마지막에만 붙어야 한다.
+- click range와 실제 동작의 정합성이 유지돼야 한다.
+
+4. benchmark gate
+
+원칙
+- 이 두 축의 변경은 모두 "좋아 보이는 구조"만으로는 유지하지 않는다.
+- 목표 경로 benchmark가 실제로 좋아질 때만 반영한다.
+
+2번 공용 파생 모델 정리의 benchmark 기준
+- 목표 경로
+  - collector mode warm
+  - collector mode stale-served
+  - collector mode forced-miss
+- 기대 효과
+  - 평균 지연이 줄거나
+  - 같은 지연이라도 hot path 계산량이 줄었다는 근거가 있어야 한다
+- 유지 기준
+  - 최소 하나의 목표 경로에서 의미 있는 개선
+  - 다른 핵심 경로 회귀 없음
+
+3번 popup / click helper 정리의 benchmark 기준
+- 목표 경로
+  - 상태줄 click 반응
+  - popup 진입 직전 helper 실행
+  - collector mode warm/stale-served 유지
+- 기대 효과
+  - click helper가 더 빨리 끝남
+  - popup 열기 전까지의 반응이 더 얇아짐
+  - 상태줄 hot path가 그대로 유지됨
+- 유지 기준
+  - click 반응 또는 상태줄 warm 경로가 실제로 개선
+  - popup 의미나 fallback semantics의 손상 없음
+
+이번에 유지한 결과
+- `summary click` 사전 확인은 collector snapshot까지만 사용하도록 줄였다.
+- 의미
+  - healthy collector가 있으면 지금처럼 empty short message를 유지한다.
+  - collector가 없으면 click helper가 live fallback을 직접 시작하지 않고 popup 쪽으로 넘긴다.
+  - 즉 degraded path에서 helper가 준실시간 경로를 직접 끌어오지 않게 했다.
+- representative benchmark
+  - 비교 대상: 예전 summary click precheck vs collector-only precheck
+  - 예전 경로: 약 `0.0038ms/op`
+  - 새 경로: 약 `0.0003ms/op`
+- hot path 회귀 확인
+  - collector mode `warm`: 약 `30.1ms`
+  - `staleServed`: 약 `30.8ms`
+  - `forcedMiss`: 약 `31.3ms`
+- 결론
+  - summary click helper를 얇은 라우터 쪽으로 한 단계 더 밀어냈고
+  - 상태줄 hot path 회귀 없이 유지할 가치가 있었다.
+
+되돌리는 기준
+- 코드가 더 깔끔해 보여도 목표 경로 수치가 좋아지지 않으면 되돌린다.
+- 평균만 좋아지고 worst-case나 흔들림이 나빠지면 되돌린다.
+- 다른 더 중요한 경로를 느리게 만들면 되돌린다.
+
+5. 실행 순서
+
+우선순위
+1. 공용 파생 모델 정리
+- 상태줄에서 반복되는 공용 의미를 더 줄인다.
+- 단, client overlay와 표현 조합은 마지막에 남긴다.
+
+2. popup / click helper 경계 정리
+- click helper를 더 얇게 만든다.
+- popup은 준실시간 경로로 분리한다.
+
+실행 순서가 이 순서여야 하는 이유
+- 공용 파생 모델이 먼저 정리되어야, popup과 click helper가 무엇을 소비해야 하는지 명확해진다.
+- 반대로 helper를 먼저 줄이려 들면, 결국 파생 의미가 다시 helper 안으로 흘러들어오기 쉽다.
+
+6. 최종 판단
+
+좋은 변화
+- 상태줄은 더 얇아진다.
+- popup과 click의 역할은 더 명확해진다.
+- 같은 의미를 여러 표면이 공유한다.
+- client 고유 상태는 마지막에만 결합된다.
+- benchmark가 개선을 뒷받침한다.
+
+나쁜 변화
+- 상태줄 렌더에서 파생 계산이 다시 늘어난다.
+- popup과 click helper가 서로의 역할을 침범한다.
+- client 고유 상태가 공용 상태를 바꾸기 시작한다.
+- 측정 없이 "나중에 좋아질 것 같은" 최적화가 늘어난다.
+
+메타 결론
+- 다음 성능 개선의 핵심은 더 복잡한 캐시나 더 공격적인 서빙이 아니다.
+- 핵심은
+  - 상태줄이 공유해야 할 의미를 한 번만 만들고
+  - popup과 click helper의 역할을 다시 얇게 분리하는 것
+이다.
+- 이 두 축이 정리되면, 이후 기능이 더 붙어도 상태줄과 상호작용 경로가 다시 두꺼워질 가능성이 줄어든다.
+
+부록: 되돌린 최적화 시도
+
+1. status-click 분기별 lazy import
+- 시도 내용:
+  - back / summary / pid 클릭마다 필요한 runtime만 동적으로 읽도록 분리
+- 측정 결과:
+  - `back` 경로는 개선이 노이즈 수준이었고
+  - `pid` 경로는 오히려 약간 느려졌다
+- 결론:
+  - 의미 있는 개선이 확인되지 않아 유지하지 않음
+  - 같은 방식의 helper lazy import는 다시 시도하지 않음
+
+2. stale-served 경로의 foreground lock 제거
+- 시도 내용:
+  - stale statusline을 서빙할 때 foreground가 refresh lock을 잡지 않고
+  - worker가 자체적으로 lock을 잡도록 넘김
+- 측정 결과:
+  - stale-served 일부 수치는 비슷하거나 개선처럼 보였지만
+  - 같은 조건에서 collector mode cold/warm이 크게 흔들렸다
+- 결론:
+  - side effect가 hot path 이득보다 컸고
+  - collector 경로 안정성까지 건드려 유지하지 않음
+  - stale-served 최적화는 lock semantics를 건드리는 방식으로 다시 시도하지 않음
+
+3. jump-back anchor tty alias 캐시
+- 시도 내용:
+  - 상태줄 hot path에서 `clientTty -> anchor` 조회 시
+  - 디렉터리 스캔을 피하려고 tty alias 파일을 추가
+- 측정 결과:
+  - `warm`과 `forced-miss`가 오히려 나빠졌고
+  - `stale-served` 개선도 일관되지 않았다
+- 결론:
+  - 현재 규모와 호출 패턴에서는 alias 파일 추가가 이득을 만들지 못했다
+  - jump anchor 조회 최적화는 별도 측정 근거가 생기기 전에는 다시 시도하지 않음

@@ -8,6 +8,7 @@ import {
   findClickedAgent,
   parseStatusClickArgs,
   parseStatusClickTarget,
+  resolveSummaryClickAction,
 } from "../dist/status-click.js";
 
 describe("status click helper", () => {
@@ -140,5 +141,39 @@ describe("status click helper", () => {
       "/dev/ttys040",
       "No Codex sessions.",
     ]);
+  });
+
+  it("shows a short message when a healthy collector snapshot proves the summary is empty", async () => {
+    const action = await resolveSummaryClickAction(
+      "agent:codex",
+      { configPath: "/tmp/marmonitor.json" },
+      {
+        resolveConfigPath: (value) => value ?? "/tmp/marmonitor.json",
+        loadConfig: async () => ({ performance: { snapshotTtlMs: 10_000 } }),
+        loadSummaryPopupAgents: async (params) => {
+          assert.equal(params.collectorOnly, true);
+          return { source: "collector", agents: [] };
+        },
+      },
+    );
+
+    assert.deepEqual(action, { kind: "message", message: "No Codex sessions." });
+  });
+
+  it("opens the popup when the collector snapshot is unavailable instead of pre-running live fallback", async () => {
+    const action = await resolveSummaryClickAction(
+      "phase:thinking",
+      { configPath: "/tmp/marmonitor.json" },
+      {
+        resolveConfigPath: (value) => value ?? "/tmp/marmonitor.json",
+        loadConfig: async () => ({ performance: { snapshotTtlMs: 10_000 } }),
+        loadSummaryPopupAgents: async (params) => {
+          assert.equal(params.collectorOnly, true);
+          return { source: "unavailable", agents: undefined };
+        },
+      },
+    );
+
+    assert.deepEqual(action, { kind: "popup" });
   });
 });

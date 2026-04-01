@@ -126,6 +126,10 @@ export function buildTmuxDisplayMessageArgs(message: string, targetClient?: stri
   return args;
 }
 
+export type SummaryClickAction =
+  | { kind: "popup" }
+  | { kind: "message"; message: string };
+
 export function buildSummaryPopupTmuxArgs(
   target: SummaryPopupTarget,
   configPath?: string,
@@ -181,6 +185,43 @@ function showTmuxDisplayMessage(message: string, targetClient?: string): void {
   }
 }
 
+export async function resolveSummaryClickAction(
+  target: SummaryPopupTarget,
+  options: {
+    configPath?: string;
+    targetClient?: string;
+  },
+  deps: {
+    resolveConfigPath?: typeof resolveConfigPath;
+    loadConfig?: typeof loadConfig;
+    loadSummaryPopupAgents?: typeof loadSummaryPopupAgents;
+  } = {},
+): Promise<SummaryClickAction> {
+  const resolveConfigPathFn = deps.resolveConfigPath ?? resolveConfigPath;
+  const loadConfigFn = deps.loadConfig ?? loadConfig;
+  const loadSummaryPopupAgentsFn = deps.loadSummaryPopupAgents ?? loadSummaryPopupAgents;
+
+  try {
+    const requestedConfigPath = resolveConfigPathFn(options.configPath);
+    const config = await loadConfigFn(requestedConfigPath);
+    const loaded = await loadSummaryPopupAgentsFn({
+      config,
+      requestedConfigPath,
+      collectorOnly: true,
+    });
+    if (loaded.agents) {
+      const items = selectSummaryPopupItems(loaded.agents, target);
+      if (items.length === 0) {
+        return { kind: "message", message: buildSummaryEmptyMessage(target) };
+      }
+    }
+  } catch {
+    // Fall through to popup launch; the popup command has its own fallback handling.
+  }
+
+  return { kind: "popup" };
+}
+
 export async function runStatusClick(args: string[] = process.argv.slice(2)): Promise<number> {
   const options = parseStatusClickArgs(args);
   if (!options.target) return 0;
@@ -198,25 +239,13 @@ export async function runStatusClick(args: string[] = process.argv.slice(2)): Pr
   }
 
   if (options.target.kind === "summary") {
-    try {
-      const requestedConfigPath = resolveConfigPath(options.configPath);
-      const config = await loadConfig(requestedConfigPath);
-      const loaded = await loadSummaryPopupAgents({
-        config,
-        requestedConfigPath,
-      });
-      if (loaded.agents) {
-        const items = selectSummaryPopupItems(loaded.agents, options.target.target);
-        if (items.length === 0) {
-          showTmuxDisplayMessage(
-            buildSummaryEmptyMessage(options.target.target),
-            options.targetClient,
-          );
-          return 0;
-        }
-      }
-    } catch {
-      // Fall through to popup launch; the popup command has its own fallback handling.
+    const action = await resolveSummaryClickAction(options.target.target, {
+      configPath: options.configPath,
+      targetClient: options.targetClient,
+    });
+    if (action.kind === "message") {
+      showTmuxDisplayMessage(action.message, options.targetClient);
+      return 0;
     }
     if (openSummaryPopup(options.target.target, options.configPath, options.targetClient)) {
       return 0;
