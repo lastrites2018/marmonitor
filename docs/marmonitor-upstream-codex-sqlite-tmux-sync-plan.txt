@@ -1,0 +1,334 @@
+marmonitor upstream 반영 계획
+
+작성일
+- 2026-04-02
+
+목적
+- upstream에서 현재 포크로 가져올 가치가 높은 두 후보를 정리한다.
+- 이번 문서는 "무엇을 가져올까"보다 "현재 포크 경계 안에서 어떻게 가져올까"를 고정하는 데 목적이 있다.
+- 대상은 아래 두 가지다.
+  - Codex SQLite 기반 세션 인덱싱
+  - tmux integration sync 점검
+
+판단 기준
+- `docs/marmonitor-performance-architecture-principles.txt`를 우선 기준으로 둔다.
+- 특히 아래 세 가지를 먼저 고정한다.
+  - 이 변경이 실시간 / 준실시간 / 비실시간 중 어느 경로에 속하는가
+  - 이 변경이 원본 상태 / 파생 상태 / 표현 결과 중 무엇을 다루는가
+  - 이 변경이 공용 상태와 client 고유 상태의 경계를 흐리는가
+
+현재 판단
+- Codex SQLite 인덱싱은 scanner의 비실시간 "세션 발견" 경로를 개선하는 작업이다.
+- tmux integration sync 점검은 CLI 설치/운영 진단 UX를 보강하는 작업이다.
+- 둘 다 가치가 있지만 변경 이유가 다르므로 하나의 작업으로 묶지 않는다.
+
+우선순위 제안
+1. tmux integration sync 점검
+- 위험이 작고 collector/statusline 경로를 건드리지 않는다.
+- 사용자 경험 개선 효과를 빠르게 낼 수 있다.
+
+2. Codex SQLite 기반 세션 인덱싱
+- 효과는 더 크지만 scanner 경계와 cache 의미를 정확히 유지해야 한다.
+- upstream 구현을 그대로 가져오기보다 현재 포크 구조에 맞게 포팅해야 한다.
+
+1. Codex SQLite 기반 세션 인덱싱 계획
+
+목적
+- Codex 세션 발견 경로에서 JSONL 7일 스캔 비용과 누락 가능성을 줄인다.
+- 세션 "발견"은 SQLite에서, 세션 "phase 판정"은 기존 JSONL에서 유지한다.
+- 즉, 원본 상태의 발견 경로만 바꾸고, phase 같은 파생 해석 경로는 현재 구조를 유지한다.
+
+현재 구조
+- `src/scanner/codex.ts`
+  - 기본적으로 `~/.codex/sessions/YYYY/MM/DD/*.jsonl`를 최근 7일 범위로 순회한다.
+  - light/full 인덱싱과 cache를 여기서 함께 관리한다.
+- `src/scanner/index.ts`
+  - Codex 프로세스는 cwd 기준으로 세션 후보를 찾고, 필요하면 process start time으로 disambiguation 한다.
+  - phase는 매칭된 `filePath`의 JSONL에서 다시 읽는다.
+
+문제
+- 7일 범위 밖이지만 여전히 살아 있는 Codex 세션은 발견하지 못할 수 있다.
+- 세션 수가 많을수록 인덱스 빌드 비용이 커진다.
+- collector/light scan에서도 세션 발견 비용이 남아 있다.
+
+최종 방향
+- Codex state SQLite의 `threads` 테이블을 세션 발견의 1차 source로 사용한다.
+- 단, 사용자가 `paths.codexSessions`를 명시한 경우에는 현재 JSONL roots를 우선한다.
+- SQLite에서 얻는 것은 아래까지만 허용한다.
+  - session id
+  - cwd
+  - rollout path
+  - model
+  - updated_at / created_at
+  - optional tokens_used
+- phase 감지와 세션 내용 해석은 계속 JSONL을 기준으로 유지한다.
+
+source precedence
+1. `paths.codexSessions`가 명시된 경우
+- JSONL roots만 사용한다.
+- SQLite discovery는 시도하지 않는다.
+
+2. `paths.codexSessions`가 명시되지 않았고 state DB를 찾을 수 있는 경우
+- SQLite discovery를 1차 source로 사용한다.
+
+3. SQLite discovery가 실패하거나 비어 있는 경우
+- 기존 JSONL roots 스캔으로 fallback 한다.
+
+4. 어떤 경우에도 phase/content 해석은 JSONL 기준을 유지한다.
+
+왜 이렇게 나누는가
+- SQLite는 "어떤 세션이 존재하는가"를 빠르게 찾는 데 적합하다.
+- JSONL은 "그 세션이 지금 어떤 phase인가"를 해석하는 데 적합하다.
+- 이 둘을 한 경로에서 동시에 다시 설계하면 scanner 경계가 불필요하게 커진다.
+
+설계 원칙
+1. 발견과 해석을 분리한다
+- SQLite는 discovery 전용이다.
+- phase 판정은 계속 JSONL 전용이다.
+- SQLite의 `rollout_path`는 현재 세션 의미 전체가 아니라, phase/content 해석으로 이어지는 `JSONL file candidate`로만 본다.
+
+2. explicit roots를 우선한다
+- 사용자가 `paths.codexSessions`를 직접 지정한 경우 SQLite를 자동 우선 적용하지 않는다.
+- 사용자가 경로를 명시했다는 것은 source-of-truth를 직접 선택한 것으로 해석한다.
+
+3. hot path에 새 관찰을 끌어오지 않는다
+- statusline foreground 경로는 collector artifact나 기존 fallback만 사용한다.
+- SQLite 쿼리 추가는 scanner/collector 갱신 경로 안에만 머물러야 한다.
+
+4. light/full cache 의미를 유지한다
+- light 인덱싱은 "빠른 발견"
+- full 인덱싱은 "발견 + 필요한 토큰 보강"
+- light 결과가 full 결과를 오염시키면 안 된다.
+
+5. SQLite는 optional dependency로 취급한다
+- `sqlite3` CLI가 없거나 state DB 탐색이 실패해도 기능 저하로만 처리한다.
+- 이 경우는 고장으로 보지 않고, 기존 JSONL 스캔 fallback으로 흘려보낸다.
+- `sqlite3` 부재나 schema mismatch 때문에 statusline/collector 경로가 깨지면 안 된다.
+
+구현 범위
+1단계. SQLite discovery 모듈 추가
+- 새 파일
+  - `src/scanner/codex-sqlite.ts`
+- 책임
+  - 최신 Codex state DB 탐색
+  - `sqlite3` CLI를 사용한 `threads` 조회
+  - `CodexSessionMeta[]` 형태로 변환
+- 실패 계약
+  - `sqlite3`가 없거나 쿼리가 실패하면 예외를 상위까지 전파하지 않고 빈 결과를 반환한다.
+- 비책임
+  - phase 감지
+  - render
+  - tmux/collector orchestration
+
+2단계. `indexCodexSessions` 진입 정책 변경
+- 수정 파일
+  - `src/scanner/codex.ts`
+- 규칙
+  - `paths.codexSessions`가 명시되면 기존 JSONL roots 경로 유지
+  - 명시되지 않았고 state DB를 찾으면 SQLite 우선
+  - SQLite가 실패하거나 비어 있으면 기존 JSONL 스캔 fallback
+
+3단계. phase 경로 유지
+- 수정 파일
+  - `src/scanner/index.ts`
+  - 필요 시 `src/scanner/codex.ts`
+- 규칙
+  - SQLite가 준 `rollout_path`를 `codexSessionFile`로 사용
+  - `detectCodexPhase()`는 지금처럼 JSONL만 읽는다
+
+4단계. token usage 정책 명확화
+- 1차 권장안
+  - light 인덱싱: SQLite 메타만 사용하고 token usage는 생략 가능
+  - full 인덱싱: 매칭된 세션에 대해서만 JSONL 기반 token 보강 허용
+- 이유
+  - 모든 SQLite 결과에 대해 다시 JSONL 전체를 읽기 시작하면 성능 이득이 줄어든다
+  - full 의미만 보존하면 사용자 가치는 유지된다
+
+5단계. cache 의미 보존
+- 수정 파일
+  - `src/scanner/cache.ts`
+  - `src/scanner/codex.ts`
+- 확인할 것
+  - `codexIndexCache.full`
+  - `codexIndexCache.light`
+  - `codexSessionFileCache`
+- 목표
+  - light 인덱스가 이후 full 인덱스를 망치지 않는다
+  - SQLite discovery 결과도 session registry/cwd lookup에서 일관되게 재사용된다
+
+테스트 계획
+- 새 테스트
+  - `tests/codex-sqlite.test.mjs`
+- 보강 테스트
+  - `tests/scanner.test.mjs`
+- 반드시 확인할 시나리오
+  - SQLite에서 active threads만 인덱싱한다
+  - state DB가 없거나 `sqlite3`가 없으면 빈 결과로 안전하게 fallback 한다
+  - explicit `codexSessions` roots가 있으면 SQLite를 우선하지 않는다
+  - 7일 범위 밖 세션도 SQLite로는 발견 가능하다
+  - light 결과가 full token enrichment를 오염시키지 않는다
+
+완료 기준
+- collector/light scan 기준 Codex session discovery 비용이 줄어든다
+- phase 동작은 기존과 의미가 같아야 한다
+- explicit roots 사용자는 기존 동작과 의미가 바뀌지 않아야 한다
+
+benchmark / rollback 기준
+- 목표 경로
+  - collector light scan의 Codex discovery 비용
+  - direct cold scan의 Codex discovery 비용
+- 유지 기준
+  - 위 목표 경로 중 적어도 하나에서 의미 있는 개선이 있을 것
+  - `statusline warm / stale-served / forced-miss`는 회귀가 없을 것
+- 되돌림 기준
+  - discovery는 빨라졌지만 phase 의미나 full/light cache 계약이 흐려지는 경우
+  - SQLite 경로가 fallback보다 더 불안정하거나, schema 차이 때문에 운영 위험이 커지는 경우
+  - statusline이나 collector hot path에 새 관찰 비용이 스며드는 경우
+
+리스크
+- SQLite schema가 플랫폼/버전마다 달라질 수 있다
+- `rollout_path`가 비어 있거나 JSONL이 이미 삭제된 경우가 있다
+- token usage를 어디서 보강할지 잘못 정하면 full/light 의미가 흐려질 수 있다
+
+비범위
+- Codex phase를 SQLite만으로 판정하는 작업
+- collector/store 포맷 변경
+- statusline 실시간 경로의 새 DB 접근
+
+2. tmux integration sync 점검 계획
+
+목적
+- 사용자가 `setup tmux` 이후 현재 integration 상태를 바로 이해할 수 있게 한다.
+- "설정은 됐는데 plugin이 아직 설치되지 않음", "TPM checkout은 있지만 sync가 필요함", "local run-shell이라 이미 최신임"을 구분해 안내한다.
+
+현재 구조
+- `src/tmux/setup.ts`
+  - plugin line 추가/삭제/존재 확인만 담당한다
+- `src/cli.ts`
+  - `setup tmux`, `uninstall-integration`만 제공한다
+
+문제
+- 사용자가 지금 어떤 설치 모드인지 알기 어렵다
+- upstream plugin을 쓰는지 local run-shell을 쓰는지 구분 안내가 없다
+- plugin line은 들어갔지만 실제 plugin이 설치되지 않은 상태를 설명하지 못한다
+
+최종 방향
+- 설치 상태를 진단하는 얇은 CLI 명령을 추가한다
+- 이 기능은 update를 실행하는 명령이 아니라, "어떻게 sync해야 하는지 안내하는 진단 명령"으로 둔다
+- 즉 이 명령은 non-mutating diagnostic contract를 갖는다.
+- 이름은 `update-integration`을 유지하더라도, 동작은 "수정"이 아니라 "현재 상태 진단 + 다음 행동 안내"로 고정한다.
+
+설계 원칙
+1. 설치 진단은 CLI 책임이다
+- collector/scanner/statusline은 이 기능을 알 필요가 없다
+
+2. 실제 상태를 4가지로만 분류한다
+- `local`
+  - `run-shell .../marmonitor.tmux` 같은 로컬 checkout 기반 wiring
+- `missing`
+  - `.tmux.conf`에는 plugin line이 있지만 실제 plugin dir가 없음
+- `tpm`
+  - TPM checkout이 있고 git metadata도 있음
+- `not_git`
+  - plugin dir는 있지만 git checkout은 아님
+
+3. 진단은 best-effort로 한다
+- 파일이 없거나 확인 실패해도 설치 자체를 깨지 않는다
+- postinstall에서도 실패 때문에 npm install이 깨지면 안 된다
+
+4. 진단 결과는 사람이 읽기 쉬워야 하고, 나중에 구조화 출력으로도 확장 가능해야 한다
+- 1차는 사람이 읽는 안내를 우선한다.
+- 다만 향후 자동화가 필요해지면 `--json` 같은 구조화 출력으로 확장할 수 있게 상태 모델은 단순하게 유지한다.
+
+구현 범위
+1단계. tmux setup helper 확장
+- 수정 파일
+  - `src/tmux/setup.ts`
+- 추가 책임
+  - 기본 plugin dir 계산
+  - plugin 설치 여부 확인
+  - integration mode 판정
+
+2단계. CLI 진단 명령 추가
+- 수정 파일
+  - `src/cli.ts`
+- 새 명령
+  - `marmonitor update-integration`
+  - `marmonitor update-integration --quiet`
+- 계약
+  - 이 명령은 현재 상태를 점검하고 다음 행동만 안내한다.
+  - plugin update, git pull, tmux reload를 자동으로 실행하지 않는다.
+- 출력 규칙
+  - `local`
+    - local run-shell 감지
+    - tmux reload면 충분하다고 안내
+  - `missing`
+    - plugin line은 있으나 설치 전
+    - `prefix+I` 안내
+  - `tpm`
+    - TPM checkout 감지
+    - `prefix+U` 또는 `git -C <pluginDir> pull --ff-only` 안내
+  - `not_git`
+    - plugin dir는 있으나 git checkout 아님
+    - 재설치 또는 수동 동기화 안내
+  - `undefined`
+    - integration 미설정
+    - `marmonitor setup tmux` 안내
+
+3단계. setup/postinstall 메시지 정리
+- 수정 파일
+  - `src/cli.ts`
+  - `bin/postinstall.cjs`
+- 목표
+  - `setup tmux` 직후 사용자가 다음 행동을 알 수 있게 한다
+  - postinstall 메시지에도 `update-integration` 힌트를 넣는다
+- 주의
+  - upstream의 daemon restart 로직은 현재 포크에 그대로 가져오지 않는다
+  - 현재 포크는 collector 기반이므로 설치 스크립트가 background lifecycle까지 떠안지 않는다
+
+4단계. 문서 반영
+- 수정 파일 후보
+  - `README.md`
+  - `README.ko.md`
+- 목표
+  - baseline plugin setup과 이 포크의 개인 wiring을 구분해서 설명한다
+  - `update-integration` 명령의 의미를 짧게 추가한다
+  - 이 명령이 non-mutating diagnostic이라는 점을 명확히 적는다
+
+테스트 계획
+- 보강 테스트
+  - `tests/tmux-setup.test.mjs`
+  - 필요 시 `tests/cli.test.mjs`
+- 반드시 확인할 시나리오
+  - local run-shell 감지
+  - configured but missing plugin 감지
+  - TPM git checkout 감지
+  - non-git plugin dir 감지
+  - 기존 add/remove 동작 회귀 없음
+
+완료 기준
+- 사용자가 현재 tmux integration 상태를 한 명령으로 이해할 수 있다
+- setup/uninstall 흐름의 책임이 더 명확해진다
+- collector/statusline 경로에는 영향이 없다
+
+리스크
+- tmux 사용자의 실제 설치 방식이 생각보다 다양할 수 있다
+- local run-shell 감지 패턴이 너무 엄격하면 놓칠 수 있다
+- 반대로 너무 느슨하면 잘못된 positive가 나올 수 있다
+
+비범위
+- tmux plugin 자동 업데이트 실행
+- TPM 설치 자체를 marmonitor가 대행하는 기능
+- click/statusline render 경로 변경
+
+권장 실행 순서
+1. tmux integration sync 점검 먼저 구현
+- 독립적이고 회귀 위험이 낮다
+
+2. Codex SQLite 인덱싱을 별도 PR/작업으로 구현
+- scanner cache 의미와 token 보강 정책을 분리해서 검증할 수 있다
+
+최종 메모
+- 두 작업은 모두 upstream에서 아이디어를 가져오되, 현재 포크 경계를 더 우선한다.
+- 특히 Codex SQLite는 upstream 코드를 그대로 합치는 작업이 아니라,
+  "세션 발견 책임만 가져오고 해석 책임은 현 구조에 남기는" 포팅 작업으로 보는 편이 맞다.
