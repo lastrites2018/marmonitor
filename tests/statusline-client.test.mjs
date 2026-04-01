@@ -191,6 +191,56 @@ describe("statusline client", () => {
     assert.equal(stdout.trim(), "AI12 | 8%");
   });
 
+  it("serves a stale collector statusline via the thin statusline binary without falling back", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-thin-stale-bin-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorStatusline("compact", 5, undefined, "AI12 | stale", root);
+    const staleAt = new Date(now - 30_000);
+    await utimes(collectorStatuslineFile("compact", 5, undefined, root), staleAt, staleAt);
+    await writeCollectorHealth(
+      {
+        pid: 9876,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "compact",
+        "--config",
+        requestedConfigPath,
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(stdout.trim(), "AI12 | stale");
+  });
+
   it("adds a jump-back indicator when the current client has an anchor", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-anchor-indicator-"));
     const requestedConfigPath = "/tmp/nonexistent-settings.json";
