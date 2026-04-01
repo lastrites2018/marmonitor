@@ -9,6 +9,9 @@
 - `Codex synthetic benchmark`는 재현 가능한 fixture 기반 측정이다.
   - JSONL 크기, 파일 수, cache 상태를 통제할 수 있다.
   - tmux, `lsof`, `pidusage`, 실제 세션 혼합도는 반영하지 않는다.
+- `Codex live benchmark`는 현재 머신과 실제 세션 상태에서 `status --json`의 Codex discovery 비용을 측정한다.
+  - 실제 Codex session discovery와 phase 후속 비용이 얼마나 큰지 보여준다.
+  - 대신 활성 세션 수와 현재 로컬 상태에 따라 숫자가 달라진다.
 - `Statusline live benchmark`는 현재 tmux/runtime 환경에서 실제 `--statusline` 경로를 측정한다.
   - 실제 병목을 잘 드러낸다.
   - 대신 호스트 스펙, 활성 pane 수, 세션 수, TTL 설정에 따라 숫자가 달라진다.
@@ -34,6 +37,23 @@
   - CPU model / logical CPU count / RAM
   - fixture file count / repeat count
   - profile별 full/light timing 요약
+
+Codex live benchmark
+- 명령
+  - `npm run bench:codex-live`
+- JSON 출력: `npm run bench:codex-live -- --json`
+- 스크립트
+  - [`scripts/bench-codex-live.mjs`](../scripts/bench-codex-live.mjs)
+- 기본 동작
+  - 현재 로컬 환경에서 `marmonitor status --json`를 실행한다.
+  - `MARMONITOR_PERF=1` 출력에서 아래 경로를 추출한다.
+    - `scanAgents.codex_index`
+    - `codex.indexCodexSessions`
+    - `codex.detectCodexPhase`
+  - 전체 `status` wall time도 함께 기록한다.
+- 목적
+  - `Codex SQLite discovery` 같은 scanner 비실시간 변경은 이 경로가 실제로 개선될 때만 유지한다.
+  - synthetic fixture만 좋아지고 live `codex_index`가 그대로면 넣지 않는다.
 
 실제 statusline live benchmark
 - 명령
@@ -69,6 +89,20 @@
     - `heavy / cold_empty_caches`: full avg `20.9ms`, light avg `4.6ms`
     - `compact / cold_empty_caches`: full avg `5.6ms`, light avg `3.4ms`
     - `warm_file_cache`: full/light 모두 약 `1ms`
+- Codex live benchmark
+  - 측정 명령: `node scripts/bench-codex-live.mjs -- --json`
+  - 측정 시점: `2026-04-02`
+  - baseline commit: `6f04e60c4605db77586dc7a73a2e4bfe8814d8d6`
+  - host: `Apple M3 Max`, `14` logical CPU, `36GB RAM`
+  - 결과 요약
+    - `status total`: 약 `3680.6ms`
+    - `scanAgents.codex_index`: 약 `1922.6ms`
+    - `codex.indexCodexSessions`: 약 `1922.5ms`
+    - `codex.detectCodexPhase`: 약 `3333.5ms`
+  - 해석
+    - synthetic fixture만 보면 light discovery 비용은 이미 작다.
+    - 반대로 현재 live full scan에서는 Codex 경로가 여전히 큰 비중을 차지한다.
+    - 따라서 `Codex SQLite`는 statusline hot path 최적화가 아니라, scanner 비실시간 경로 최적화로만 평가해야 한다.
 - live statusline benchmark
   - 측정 명령: `node scripts/bench-statusline-live.mjs --json`
   - 측정 시점 commit: `b16af20567c89108185bf4860f9f02f68951b4c5`
@@ -111,8 +145,9 @@
 
 검토 순서
 1. `npm run bench:codex-index -- --json`로 fixture 기반 숫자를 캡처한다.
-2. 실제 tmux 세션 안에서 `npm run bench:statusline-live -- --json`를 실행한다.
-3. PR이나 이슈에는 두 결과를 함께 적되, fixture profile과 runtime 환경을 같이 적는다.
+2. `npm run bench:codex-live -- --json`로 실제 Codex discovery 비용을 캡처한다.
+3. 실제 tmux 세션 안에서 `npm run bench:statusline-live -- --json`를 실행한다.
+4. PR이나 이슈에는 세 결과를 함께 적되, fixture profile과 runtime 환경을 같이 적는다.
 
 최적화 반영 규칙
 - 최적화 변경은 먼저 목표 경로를 하나 고른다.

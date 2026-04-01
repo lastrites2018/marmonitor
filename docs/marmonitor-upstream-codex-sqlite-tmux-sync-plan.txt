@@ -38,6 +38,25 @@ marmonitor upstream 반영 계획
 - 세션 "발견"은 SQLite에서, 세션 "phase 판정"은 기존 JSONL에서 유지한다.
 - 즉, 원본 상태의 발견 경로만 바꾸고, phase 같은 파생 해석 경로는 현재 구조를 유지한다.
 
+Phase 0. benchmark-first 진입 기준
+- 이 작업은 바로 구현하지 않는다.
+- 먼저 아래 두 숫자를 같이 보고 go/no-go를 정한다.
+  - synthetic fixture의 `light cold_empty_caches`
+  - live full scan의 `scanAgents.codex_index`
+- 현재 기준선
+  - synthetic fixture는 이미 비교적 작다.
+    - `heavy / cold_empty_caches`: light avg `2.9ms`
+    - `compact / cold_empty_caches`: light avg `3.4ms`
+  - live full scan에서는 Codex 경로 비중이 크다.
+    - `status total`: 약 `3680.6ms`
+    - `scanAgents.codex_index`: 약 `1922.6ms`
+    - `codex.indexCodexSessions`: 약 `1922.5ms`
+    - `codex.detectCodexPhase`: 약 `3333.5ms`
+- 해석
+  - synthetic 숫자만 보면 SQLite 도입 근거가 약하다.
+  - 반대로 live full scan에서는 Codex 경로가 크므로, scanner 비실시간 경로 최적화 후보로는 가치가 있다.
+  - 따라서 이 작업은 statusline hot path 최적화가 아니라, `status`/collector 갱신 경로 최적화로만 평가한다.
+
 현재 구조
 - `src/scanner/codex.ts`
   - 기본적으로 `~/.codex/sessions/YYYY/MM/DD/*.jsonl`를 최근 7일 범위로 순회한다.
@@ -106,6 +125,14 @@ source precedence
 - `sqlite3` 부재나 schema mismatch 때문에 statusline/collector 경로가 깨지면 안 된다.
 
 구현 범위
+사전 단계. live benchmark 경로 확보
+- 관련 파일
+  - `scripts/bench-codex-live.mjs`
+  - `docs/performance-benchmarking.md`
+- 목표
+  - future SQLite 구현 전후에 같은 명령으로 `scanAgents.codex_index`를 비교할 수 있게 한다.
+  - 이 단계에서는 제품 동작을 바꾸지 않는다.
+
 1단계. SQLite discovery 모듈 추가
 - 새 파일
   - `src/scanner/codex-sqlite.ts`
@@ -172,13 +199,16 @@ source precedence
 - collector/light scan 기준 Codex session discovery 비용이 줄어든다
 - phase 동작은 기존과 의미가 같아야 한다
 - explicit roots 사용자는 기존 동작과 의미가 바뀌지 않아야 한다
+- `npm run bench:codex-live -- --json` 기준에서 `scanAgents.codex_index`가 의미 있게 줄어들어야 한다
 
 benchmark / rollback 기준
 - 목표 경로
+  - live full scan의 `scanAgents.codex_index`
   - collector light scan의 Codex discovery 비용
   - direct cold scan의 Codex discovery 비용
 - 유지 기준
-  - 위 목표 경로 중 적어도 하나에서 의미 있는 개선이 있을 것
+  - live full scan의 `scanAgents.codex_index`에서 먼저 의미 있는 개선이 있을 것
+  - 그 다음 collector light/direct cold 중 적어도 하나에서도 개선이 있을 것
   - `statusline warm / stale-served / forced-miss`는 회귀가 없을 것
 - 되돌림 기준
   - discovery는 빨라졌지만 phase 의미나 full/light cache 계약이 흐려지는 경우

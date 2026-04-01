@@ -51,6 +51,7 @@
     "lint": "biome check src tests scripts",
     "test": "node --test tests/*.test.mjs",
     "bench:codex-index": "npm run build && node scripts/bench-codex-index.mjs",
+    "bench:codex-live": "npm run build && node scripts/bench-codex-live.mjs",
     "bench:statusline-live": "npm run build && node scripts/bench-statusline-live.mjs",
     "postinstall": "node bin/postinstall.cjs",
     "preuninstall": "node bin/preuninstall.cjs",
