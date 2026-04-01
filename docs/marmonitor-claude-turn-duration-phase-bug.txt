@@ -1,0 +1,61 @@
+Claude turn_duration phase bug
+
+Summary
+- Completed Claude turns were sometimes shown as `thinking` in the tmux statusline.
+- The concrete symptom was a finished Claude session still rendering as `🤔Cl ... 2m/3m`.
+- The issue was not a collector refresh failure. The underlying Claude phase detection rule was wrong for one real JSONL tail pattern.
+
+Observed symptom
+- `status --json` and the statusline showed a Claude session in `phase: thinking` long after the work had completed.
+- The affected session had already returned to the prompt in tmux.
+- The stale-looking `thinking` label survived well past the normal decay window, which showed that this was not just a timing or cache-expiry issue.
+
+Root cause
+- Claude JSONL can end a completed turn with:
+  - `assistant`
+  - `message.content = [ { type: "text", ... } ]`
+  - `stop_reason = null`
+  - followed by a `system` entry with `subtype = "turn_duration"`
+- The old parser treated any `assistant text + stop_reason null` as `thinking`.
+- That was too broad.
+- In the real completed case, the later `system/turn_duration` entry was the reliable signal that the assistant turn had already finished.
+
+Why this was confusing
+- The session looked finished in tmux, but marmonitor still showed `thinking`.
+- Because the parser produced `thinking` directly from the JSONL tail, the collector kept reproducing the wrong phase even after normal refresh intervals had passed.
+- This made the problem look like a cache/refresh bug even though the real issue was phase classification semantics.
+
+Fix
+- Narrow the special case instead of changing the whole `stop_reason = null` rule.
+- New rule:
+  - if the latest meaningful Claude assistant entry is `text` with `stop_reason = null`
+  - and a later `system` entry with `subtype = "turn_duration"` exists in the recent tail
+  - classify that turn as `done`
+- Keep the old behavior for:
+  - `assistant text + stop_reason null` without later `turn_duration`
+  - `assistant tool_use`
+  - `user`
+- This keeps the fix narrow and avoids downgrading real in-progress sessions.
+
+Why this is safe
+- The fix does not reinterpret all `stop_reason = null` assistant text as `done`.
+- It only upgrades the pattern that has explicit Claude completion metadata (`turn_duration`).
+- Real in-progress sessions still remain `thinking` unless the completed-turn marker is present.
+
+Runtime note
+- After the code change, an already-running collector may still serve statusline text built with the old code path.
+- Restarting the collector ensures the new rule is reflected in fresh snapshot/statusline artifacts.
+
+Regression coverage
+- Added test: `assistant text(stop_reason null) -> system turn_duration` => `done`
+- Added test: `assistant text(stop_reason null)` without later `turn_duration` => `thinking`
+- These tests live in:
+  - `tests/runtime-cache.test.mjs`
+
+Files changed by the fix
+- `src/scanner/claude.ts`
+- `tests/runtime-cache.test.mjs`
+
+Commit
+- `ff4770f` `fix: classify completed Claude turns with turn-duration metadata`
+
