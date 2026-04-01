@@ -1,5 +1,7 @@
-import { runStatuslineCommand } from "./collector/statusline.js";
-import { renderUnavailableStatusline } from "./output/index.js";
+import { readCollectorStatuslineForRequest } from "./collector/client.js";
+import { spawnStatuslineRefreshWorker } from "./collector/statusline-refresh.js";
+import { resolveConfigPath } from "./config/index.js";
+import { renderUnavailableStatusline } from "./output/unavailable.js";
 import type { StatuslineFormat } from "./output/utils.js";
 import { findJumpAnchorByClientTty } from "./tmux/jump-anchor.js";
 
@@ -106,10 +108,37 @@ export function parseStatuslineClientArgs(args: string[]): StatuslineClientOptio
   };
 }
 
+async function readFastCollectorStatusline(
+  options: StatuslineClientOptions,
+): Promise<string | undefined> {
+  const requestedConfigPath = resolveConfigPath(options.configPath);
+  const collectorStatusline = await readCollectorStatuslineForRequest({
+    requestedConfigPath,
+    format: options.format,
+    width: options.width,
+  });
+  if (!collectorStatusline) {
+    return undefined;
+  }
+  if (collectorStatusline.freshness === "stale") {
+    await spawnStatuslineRefreshWorker({
+      format: options.format,
+      attentionLimit: collectorStatusline.attentionLimit,
+      width: options.width,
+      configPath: options.configPath,
+    });
+  }
+  return collectorStatusline.value;
+}
+
 export async function runStatuslineClient(args: string[] = process.argv.slice(2)): Promise<string> {
   const options = parseStatuslineClientArgs(args);
   try {
-    const output = await runStatuslineCommand(options);
+    let output = await readFastCollectorStatusline(options);
+    if (output === undefined) {
+      const { runStatuslineCommand } = await import("./collector/statusline.js");
+      output = await runStatuslineCommand(options);
+    }
     if (options.format !== "tmux-badges" || !options.clientTty) {
       return output;
     }

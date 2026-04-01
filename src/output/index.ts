@@ -9,6 +9,7 @@ import type {
   TokenUsage,
   WorkerProcess,
 } from "../types.js";
+import { renderUnavailableStatusline } from "./unavailable.js";
 import {
   type StatuslineFormat,
   type TmuxBadgeStyle,
@@ -30,6 +31,7 @@ import {
   shortenPath,
   visibleTextWidth,
 } from "./utils.js";
+export { renderUnavailableStatusline } from "./unavailable.js";
 
 export interface StatuslineRenderOptions {
   tmuxBadgeStyle?: TmuxBadgeStyle;
@@ -507,14 +509,6 @@ export async function printDock(agents: AgentSession[], maxLines = 12): Promise<
   if (unmatched.length > 0) {
     console.log(chalk.magenta(`! ${unmatched.length} unmatched (marmonitor clean)`));
   }
-}
-
-/** Print one-line summary for tmux/terminal status bar */
-export function renderUnavailableStatusline(format: StatuslineFormat = "compact"): string {
-  if (format === "wezterm-pills") {
-    return "focus\tmarmonitor unavailable\t#bac2de\t#313244";
-  }
-  return "marmonitor unavailable";
 }
 
 /** Print one-line summary for tmux/terminal status bar */

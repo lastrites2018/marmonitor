@@ -1,61 +1,22 @@
-import { spawn } from "node:child_process";
 import { loadConfig, resolveConfigPath as resolveLoadedConfigPath } from "../config/index.js";
-import { renderStatusline, renderUnavailableStatusline } from "../output/index.js";
+import { renderStatusline } from "../output/index.js";
+import { renderUnavailableStatusline } from "../output/unavailable.js";
 import type { StatuslineFormat } from "../output/utils.js";
-import { profileAsync } from "../perf.js";
-import { acquireStatuslineRefreshLock, releaseStatuslineRefreshLock } from "../snapshot-cache.js";
+import { releaseStatuslineRefreshLock } from "../snapshot-cache.js";
 import { getAgentsSnapshot } from "../snapshot/service.js";
 import {
   readCollectorStatuslineForRequest,
   readHealthyCollectorSnapshotForRequest,
   startDetachedCollector,
 } from "./client.js";
-import { resolveStatuslineEntrypoint } from "./entrypoints.js";
 import { decideStatuslineServe } from "./model.js";
+import { spawnStatuslineRefreshWorker } from "./statusline-refresh.js";
 import {
   readCachedSnapshotEntry,
   readCachedStatuslineEntry,
   writeCachedStatusline,
   writeCollectorStatusline,
 } from "./store.js";
-
-async function spawnStatuslineRefreshWorker(params: {
-  format: StatuslineFormat;
-  attentionLimit: number;
-  width?: number;
-  configPath?: string;
-}): Promise<boolean> {
-  const acquired = await profileAsync("cli", "acquireStatuslineRefreshLock", () =>
-    acquireStatuslineRefreshLock(params.format, params.attentionLimit, params.width),
-  );
-  if (!acquired) return false;
-
-  const args = [
-    resolveStatuslineEntrypoint(),
-    "--statusline",
-    "--statusline-format",
-    params.format,
-    ...(params.width ? ["--width", String(params.width)] : []),
-    ...(params.configPath ? ["--config", params.configPath] : []),
-  ];
-
-  try {
-    const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        MARMONITOR_STATUSLINE_WORKER: "1",
-      },
-    });
-    child.unref();
-    return true;
-  } catch {
-    await releaseStatuslineRefreshLock(params.format, params.attentionLimit, params.width);
-    return false;
-  }
-}
 
 export async function runStatuslineCommand(params: {
   format: StatuslineFormat;
