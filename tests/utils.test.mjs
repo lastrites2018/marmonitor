@@ -1623,6 +1623,18 @@ describe("idle right rail", () => {
     assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
   });
 
+  it("shows a weak empty marker only when there is enough room for an empty idle rail", () => {
+    const snapshot = {
+      total: 0,
+      claudeCount: 0,
+      codexCount: 0,
+      entries: [],
+    };
+
+    assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle -");
+    assert.equal(buildIdleRightRail(snapshot, 130, 5), undefined);
+  });
+
   it("separates idle popup ranges from direct idle session jumps in tmux rail", () => {
     const now = Math.floor(Date.now() / 1000);
     const snapshot = {
@@ -1646,6 +1658,20 @@ describe("idle right rail", () => {
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 130, 7),
       "#[range=user|sum:idle]idle 2#[norange]",
+    );
+  });
+
+  it("keeps the empty idle marker clickable through the idle summary target", () => {
+    const snapshot = {
+      total: 0,
+      claudeCount: 0,
+      codexCount: 0,
+      entries: [],
+    };
+
+    assert.equal(
+      buildTmuxIdleRightRail(snapshot, 130, 20),
+      "#[range=user|sum:idle]idle -#[norange]",
     );
   });
 

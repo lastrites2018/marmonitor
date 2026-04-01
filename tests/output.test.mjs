@@ -81,4 +81,50 @@ describe("renderStatusline idle right rail", () => {
     });
     assert.doesNotMatch(text, /\bidle\b/);
   });
+
+  it("shows an empty idle marker when wide enough but there are no warm-idle candidates", async () => {
+    const text = await renderStatusline(
+      [
+        {
+          pid: 20,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/marmonitor",
+          status: "Idle",
+          lastActivityAt: now - 30,
+          recentCompleteAt: now - 30,
+          idleSince: now - 30,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 21,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 2 * 60 * 60,
+          idleSince: now - 2 * 60 * 60,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 22,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/fmbattle",
+          status: "Idle",
+          phase: "thinking",
+          lastActivityAt: now - 10 * 60,
+          idleSince: now - 10 * 60,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+      ],
+      "tmux-badges",
+      5,
+      180,
+      {
+        tmuxBadgeStyle: "plain",
+      },
+    );
+    assert.match(text, /#\[range=user\|sum:idle]idle -#\[norange]$/);
+  });
 });

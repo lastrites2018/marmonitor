@@ -695,7 +695,8 @@ function buildIdleRightRailCounts(snapshot: IdleRightRailSnapshot): string[] {
 type IdleRightRailVariant =
   | { kind: "full"; countLabel: string; names: IdleRightRailEntry[] }
   | { kind: "compact"; countLabel: string }
-  | { kind: "minimal" };
+  | { kind: "minimal" }
+  | { kind: "empty" };
 
 function formatIdleRightRailEntry(entry: IdleRightRailEntry): string {
   const time = formatElapsedCompact(entry.lastAt);
@@ -707,8 +708,11 @@ function resolveIdleRightRailVariant(
   width: number | undefined,
   availableWidth: number,
 ): IdleRightRailVariant | undefined {
-  if (!width || width < 90 || snapshot.total === 0 || availableWidth <= 0) {
+  if (!width || width < 90 || availableWidth <= 0) {
     return undefined;
+  }
+  if (snapshot.total === 0) {
+    return visibleTextWidth("idle -") <= availableWidth ? { kind: "empty" } : undefined;
   }
 
   const countParts = buildIdleRightRailCounts(snapshot);
@@ -741,6 +745,9 @@ export function buildIdleRightRail(
 ): string | undefined {
   const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
   if (!variant) return undefined;
+  if (variant.kind === "empty") {
+    return "idle -";
+  }
   if (variant.kind === "minimal") {
     return `idle ${snapshot.total}`;
   }
@@ -761,6 +768,9 @@ export function buildTmuxIdleRightRail(
 ): string | undefined {
   const variant = resolveIdleRightRailVariant(snapshot, width, availableWidth);
   if (!variant) return undefined;
+  if (variant.kind === "empty") {
+    return makeTmuxSummaryRange("idle", "idle -");
+  }
   if (variant.kind === "minimal") {
     return makeTmuxSummaryRange("idle", `idle ${snapshot.total}`);
   }
