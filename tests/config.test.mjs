@@ -39,7 +39,7 @@ describe("getDefaults", () => {
     assert.equal(config.display.showDead, false);
     assert.equal(config.display.sortBy, "cwd");
     assert.equal(config.display.attentionLimit, 10);
-    assert.equal(config.display.statuslineAttentionLimit, 7);
+    assert.equal(config.display.statuslineAttentionLimit, 5);
     assert.equal(config.intervention.enabled, false);
     assert.equal(config.intervention.mode, "alert");
     assert.equal(config.intervention.defaultAction, "alert");

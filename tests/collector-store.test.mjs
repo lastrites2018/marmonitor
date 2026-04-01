@@ -193,11 +193,11 @@ describe("collector store", () => {
         configPath: "/tmp/settings.json",
         snapshotTtlMs: 2_000,
         statuslineTtlMs: 2_000,
-        statuslineAttentionLimit: 7,
+        statuslineAttentionLimit: 5,
       },
       root,
     );
-    await writeCollectorStatusline("compact", 7, undefined, "AI7 | 10%", root);
+    await writeCollectorStatusline("compact", 5, undefined, "AI7 | 10%", root);
 
     const statusline = await readCurrentCollectorStatusline({
       requestedConfigPath: "/tmp/settings.json",

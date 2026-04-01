@@ -299,7 +299,7 @@ function buildMinimalConfigSample(): string {
     {
       display: {
         attentionLimit: 10,
-        statuslineAttentionLimit: 7,
+        statuslineAttentionLimit: 5,
       },
       integration: {
         tmux: {
@@ -336,7 +336,7 @@ function buildAdvancedConfigSample(): string {
       },
       display: {
         attentionLimit: 10,
-        statuslineAttentionLimit: 7,
+        statuslineAttentionLimit: 5,
       },
       integration: {
         tmux: {

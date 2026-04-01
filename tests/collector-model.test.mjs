@@ -170,7 +170,7 @@ describe("collector statusline serve policy", () => {
       configPath: "/tmp/settings.json",
       snapshotTtlMs: 4_000,
       statuslineTtlMs: 4_000,
-      statuslineAttentionLimit: 7,
+      statuslineAttentionLimit: 5,
     };
 
     assert.equal(isCollectorHealthyForStatusline(health, now), true);

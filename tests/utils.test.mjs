@@ -612,18 +612,18 @@ describe("buildStatuslineSummary", () => {
       "⏳ Claude mjjo allow",
     );
     assert.match(text, /Cl 14/);
-    assert.match(text, /#\[range=user\|summary:agent:claude]Cl 14#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:claude]Cl 14#\[norange]/);
     assert.match(text, /Cx 2/);
-    assert.match(text, /#\[range=user\|summary:agent:codex]Cx 2#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:codex]Cx 2#\[norange]/);
     assert.match(text, /Gm 3/);
     assert.match(text, /⏳ 2/);
-    assert.match(text, /#\[range=user\|summary:phase:permission]⏳ 2#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:perm]⏳ 2#\[norange]/);
     assert.match(text, /⚠ 2/);
-    assert.match(text, /#\[range=user\|summary:issue]⚠ 2#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:issue]⚠ 2#\[norange]/);
     assert.match(text, /🤔 3/);
-    assert.match(text, /#\[range=user\|summary:phase:thinking]🤔 3#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:think]🤔 3#\[norange]/);
     assert.match(text, /🔧 1/);
-    assert.match(text, /#\[range=user\|summary:phase:tool]🔧 1#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:tool]🔧 1#\[norange]/);
     assert.match(text, /Claude mjjo allow/);
     assert.doesNotMatch(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
@@ -653,7 +653,7 @@ describe("buildStatuslineSummary", () => {
     assert.match(text, /#\[fg=/);
     assert.doesNotMatch(text, //);
     assert.doesNotMatch(text, /bg=#fab387/);
-    assert.match(text, /#\[range=user\|summary:agent:claude].*Cl 14.*#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:claude].*Cl 14.*#\[norange]/);
   });
 
   it("keeps pill badge style available as an option", () => {
@@ -678,7 +678,7 @@ describe("buildStatuslineSummary", () => {
 
     assert.match(text, //);
     assert.match(text, /bg=#fab387/);
-    assert.match(text, /#\[range=user\|summary:agent:claude].*#\[norange]/);
+    assert.match(text, /#\[range=user\|sum:claude].*#\[norange]/);
   });
 
   it("builds shared status pills for terminal adapters", () => {

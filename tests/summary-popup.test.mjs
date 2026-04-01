@@ -17,10 +17,13 @@ describe("summary popup target parsing", () => {
   });
 
   it("parses summary status ranges", () => {
+    assert.equal(parseSummaryRange("sum:codex"), "agent:codex");
+    assert.equal(parseSummaryRange("sum:think"), "phase:thinking");
+    assert.equal(parseSummaryRange("sum:issue"), "issue");
     assert.equal(parseSummaryRange("summary:agent:codex"), "agent:codex");
     assert.equal(parseSummaryRange("summary:issue"), "issue");
     assert.equal(parseSummaryRange("pid:123"), undefined);
-    assert.equal(serializeSummaryRange("phase:tool"), "summary:phase:tool");
+    assert.equal(serializeSummaryRange("phase:tool"), "sum:tool");
   });
 });
 

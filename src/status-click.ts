@@ -89,11 +89,11 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function openSummaryPopup(
+export function buildSummaryPopupTmuxArgs(
   target: SummaryPopupTarget,
   configPath?: string,
   targetClient?: string,
-): boolean {
+): string[] {
   const command = [
     process.execPath,
     resolveCliEntrypoint(),
@@ -105,12 +105,20 @@ function openSummaryPopup(
     .map(shellQuote)
     .join(" ");
 
-  const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
+  const args = ["display-popup", "-w", "70%", "-h", "70%"];
   if (targetClient) {
-    args.push("-t", targetClient);
+    args.push("-c", targetClient);
   }
   args.push(command);
+  return args;
+}
 
+function openSummaryPopup(
+  target: SummaryPopupTarget,
+  configPath?: string,
+  targetClient?: string,
+): boolean {
+  const args = buildSummaryPopupTmuxArgs(target, configPath, targetClient);
   try {
     execFileSync("tmux", args, {
       stdio: "ignore",

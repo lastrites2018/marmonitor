@@ -17,6 +17,20 @@ const VALID_SUMMARY_TARGETS = new Set<SummaryPopupTarget>([
   "issue",
 ]);
 
+const RANGE_TO_TARGET: Record<string, SummaryPopupTarget> = {
+  "sum:claude": "agent:claude",
+  "sum:codex": "agent:codex",
+  "sum:gemini": "agent:gemini",
+  "sum:perm": "phase:permission",
+  "sum:think": "phase:thinking",
+  "sum:tool": "phase:tool",
+  "sum:issue": "issue",
+};
+
+const TARGET_TO_RANGE = new Map<SummaryPopupTarget, string>(
+  Object.entries(RANGE_TO_TARGET).map(([range, target]) => [target, range]),
+);
+
 export function parseSummaryPopupTarget(value: string | undefined): SummaryPopupTarget | undefined {
   if (!value) return undefined;
   const normalized = value.trim();
@@ -27,10 +41,14 @@ export function parseSummaryPopupTarget(value: string | undefined): SummaryPopup
 
 export function parseSummaryRange(value: string | undefined): SummaryPopupTarget | undefined {
   if (!value) return undefined;
-  const match = /^summary:(.+)$/.exec(value.trim());
-  return parseSummaryPopupTarget(match?.[1]);
+  const normalized = value.trim();
+  if (normalized in RANGE_TO_TARGET) {
+    return RANGE_TO_TARGET[normalized];
+  }
+  const legacyMatch = /^summary:(.+)$/.exec(normalized);
+  return parseSummaryPopupTarget(legacyMatch?.[1]);
 }
 
 export function serializeSummaryRange(target: SummaryPopupTarget): string {
-  return `summary:${target}`;
+  return TARGET_TO_RANGE.get(target) ?? `summary:${target}`;
 }

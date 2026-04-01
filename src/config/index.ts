@@ -130,7 +130,7 @@ const DEFAULTS: MarmonitorConfig = {
     showDead: false,
     sortBy: "cwd",
     attentionLimit: 10,
-    statuslineAttentionLimit: 7,
+    statuslineAttentionLimit: 5,
   },
   agents: {
     "Claude Code": { processNames: ["claude"] },

@@ -177,11 +177,11 @@ describe("statusline client", () => {
         configPath: requestedConfigPath,
         snapshotTtlMs: 10_000,
         statuslineTtlMs: 10_000,
-        statuslineAttentionLimit: 7,
+        statuslineAttentionLimit: 5,
       },
       root,
     );
-    await writeCollectorStatusline("tmux-badges", 7, undefined, "Cx 1", root);
+    await writeCollectorStatusline("tmux-badges", 5, undefined, "Cx 1", root);
     await writeJumpAnchor(
       {
         clientId: "$3",
