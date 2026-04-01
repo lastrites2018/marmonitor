@@ -1,0 +1,73 @@
+세션 개요
+
+- 이번 세션의 중심은 tmux statusline 기반 summary popup과 jump-back UX를 실사용 가능한 수준으로 정리하는 것이었다.
+- 성능 목표는 "foreground statusline에서 scan이 다시 돌지 않게 유지"였고, UX 목표는 "badge 클릭과 popup 선택이 설명 가능한 방식으로 동작"하게 만드는 것이었다.
+- 현재 기준 브랜치는 `perf/statusline-scan-optimization`이고, 주요 최근 커밋은 아래 흐름이다.
+  - `d8418ed` collector-backed summary popup 안정화
+  - `f9d612e` interactive summary popup pagination
+
+명확해진 점
+
+- statusline 성능의 본질은 scan 자체보다 foreground 경로에 scan이 다시 올라오지 않게 막는 것이다.
+- summary popup은 click 한 번 때문에 live scan으로 떨어지면 안 된다. collector snapshot 우선 계약을 분리한 것이 맞았다.
+- `⚠` popup은 단일 목록보다 `Stalled / Unmatched` 섹션으로 나누는 편이 훨씬 설명 가능하다.
+- interactive popup의 overflow는 2자리 직접 입력보다 pagination이 낫다. 현재 입력 모델 `1-9`, `0`, `Enter`, `n/p`, `q/Esc`가 가장 단순하다.
+- `Risk`는 아직 넣지 않는 것이 맞다. 현재는 명확한 데이터 규칙이 없어 경고 의미만 흐린다.
+
+잘 작동한 접근
+
+- collector health와 last-good snapshot/statusline을 분리해서 관리한 것이 성능 회귀를 막는 데 효과적이었다.
+- width-specific statusline artifact는 foreground 재렌더보다 "recent stale serve + background refresh"가 맞았다.
+- popup 모델, 렌더, data path를 각각 분리한 뒤 수정하니 성능과 UX를 같이 다루기 쉬웠다.
+- summary popup도 statusline처럼 "짧은 range code + 내부 복원" 방식이 맞았다. tmux의 user range 길이 제한을 우회하는 데 결정적이었다.
+
+기대와 다르게 흘러간 지점에서 배운 점
+
+- summary popup 기능을 붙인 뒤 성능이 다시 흔들린 직접 원인은 popup 렌더보다 collector 운영 상태였다.
+- collector가 `refreshing` 상태를 쓸 때 마지막 성공 메타를 잃으면 foreground가 unhealthy로 판단하고 fallback scan으로 내려간다. statusline 성능 문제는 기능 코드보다 collector life-cycle 버그에서 다시 생길 수 있다.
+- tmux popup은 `display-popup -E`를 쓰면 read-only 출력 명령에서는 바로 닫힌다. popup은 "명령 종료 후 닫기"와 상성이 나쁘다.
+- tmux `range=user|X`의 `X`는 짧아야 한다. 긴 semantic string을 그대로 넣으면 일부 badge만 클릭되고 일부는 조용히 깨진다.
+
+현재 구현 상태
+
+- summary badge 클릭 popup
+  - `Cl`, `Cx`, `Gm`, `⏳`, `🤔`, `🔧`, `⚠` 모두 popup 대상
+  - click 경로는 collector-only snapshot 사용
+- interactive popup
+  - `1-9` jump
+  - `0` = 10번 jump
+  - `Enter` = 1번 jump
+  - `n/p`, 좌우 화살표 페이지 이동
+  - `q/Esc` 종료
+- issue popup
+  - `Stalled`
+  - `Unmatched`
+  - `Risk`는 구조만 있고 비어 있음
+- jump-back
+  - 첫 jump 전 위치를 client별 anchor로 저장
+  - `Prefix+g`, `F6`, `↩` 클릭으로 복귀 가능
+
+열린 질문
+
+- `Risk`를 실제 규칙 기반 모델로 넣을지 여부는 아직 열려 있다.
+- popup pagination의 footer/controls 표시는 더 줄일 여지가 있다. 현재는 설명성 우선이고, 실사용 후 더 간결하게 줄일 수 있다.
+- 로컬 tmux 설정은 저장소 밖 파일이므로, 현재 UX의 일부는 repo 안 코드만으로는 완결되지 않는다. 재현 문서화가 더 필요할 수 있다.
+
+다음 세션 재시작 가이드
+
+- 현재 워킹트리에는 popup UI 미세 조정 변경이 아직 커밋되지 않았다.
+  - `src/cli.ts`
+  - `src/summary-popup/render.ts`
+  - `tests/summary-popup.test.mjs`
+- 이번 미커밋 변경의 의도
+  - popup header 아래에 `Showing X-Y of N` 추가
+  - footer에 controls 설명 추가
+  - CLI prompt는 `Select:`로 축소
+- 재시작 순서
+  1. `npm run build`
+  2. `npm test`
+  3. 실제 popup을 열어 header/footer가 과하지 않은지 확인
+  4. 괜찮으면 popup UI 미세 조정만 별도 커밋
+- 보류 기준
+  - `Risk` 모델 추가는 하지 않는다.
+  - foreground statusline에 다시 `scanAgents`, `renderStatusline`, `getSystemInfo`가 보이면 그 작업은 되돌아봐야 한다.

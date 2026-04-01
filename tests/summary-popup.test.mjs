@@ -241,8 +241,10 @@ describe("summary popup render", () => {
     );
 
     assert.match(text, /^Codex Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /\nShowing 11-12 of 12\n/);
     assert.match(text, /\n\n1\. Codex repo-11/);
     assert.match(text, /\n\n2\. Codex repo-12/);
+    assert.match(text, /\n\nControls: 1-2  Enter=1  n\/p page  q close$/);
   });
 
   it("renders issue page sections with local counts when a section is partially shown", () => {
@@ -268,7 +270,9 @@ describe("summary popup render", () => {
     );
 
     assert.match(text, /^Issue Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /\nShowing 11-12 of 12\n/);
     assert.match(text, /\n\nStalled \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
     assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.match(text, /\n\nControls: 1-2  Enter=1  n\/p page  q close$/);
   });
 });

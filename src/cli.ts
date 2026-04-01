@@ -258,11 +258,7 @@ async function promptSummaryPopupAction(maxChoice: number): Promise<SummaryPopup
     return { kind: "close" };
   }
 
-  const prompt =
-    maxChoice >= 10
-      ? "\n1-9 jump, 0=item10, Enter=item1, n/p page, q close: "
-      : `\n1-${maxChoice} jump, Enter=item1, n/p page, q close: `;
-  process.stdout.write(prompt);
+  process.stdout.write("\nSelect: ");
 
   return await new Promise<SummaryPopupAction>((resolve) => {
     const stdin = process.stdin;

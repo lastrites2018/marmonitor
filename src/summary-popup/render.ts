@@ -67,6 +67,19 @@ function formatPageHeader(title: string, page: number, totalPages: number): stri
   return `${title}  [Page ${page}/${totalPages}]`;
 }
 
+function formatPageWindow(startIndex: number, itemCount: number, totalItems: number): string | undefined {
+  if (totalItems === 0 || itemCount === 0) return undefined;
+  const start = startIndex + 1;
+  const end = startIndex + itemCount;
+  return `Showing ${start}-${end} of ${totalItems}`;
+}
+
+function formatPageControls(itemCount: number, totalPages: number): string {
+  const jumpLabel = itemCount >= 10 ? "1-9, 0=10" : `1-${itemCount}`;
+  const pagingLabel = totalPages > 1 ? "  n/p page" : "";
+  return `Controls: ${jumpLabel}  Enter=1${pagingLabel}  q close`;
+}
+
 export function renderSummaryPopupPage(
   agents: AgentSession[],
   target: SummaryPopupTarget,
@@ -78,13 +91,15 @@ export function renderSummaryPopupPage(
   if (popupPage.totalItems === 0) {
     return `${title}\n\nNo matching sessions.`;
   }
+  const pageWindow = formatPageWindow(popupPage.startIndex, popupPage.items.length, popupPage.totalItems);
+  const controls = formatPageControls(popupPage.items.length, popupPage.totalPages);
 
   if (target !== "issue") {
     const labels = buildStatuslinePathLabels(popupPage.items, 32);
     const body = popupPage.items
       .map((agent, index) => popupLine(index + 1, agent, labels[index]))
       .join("\n\n");
-    return `${title}\n\n${body}`;
+    return `${title}${pageWindow ? `\n${pageWindow}` : ""}\n\n${body}\n\n${controls}`;
   }
 
   let currentIndex = 1;
@@ -101,5 +116,5 @@ export function renderSummaryPopupPage(
     return `${heading}\n\n${body}`;
   });
 
-  return `${title}\n\n${renderedSections.join("\n\n")}`;
+  return `${title}${pageWindow ? `\n${pageWindow}` : ""}\n\n${renderedSections.join("\n\n")}\n\n${controls}`;
 }
