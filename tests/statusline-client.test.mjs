@@ -14,6 +14,7 @@ import {
   writeCollectorSnapshot,
   writeCollectorStatusline,
 } from "../dist/collector/store.js";
+import { getDefaults } from "../dist/config/index.js";
 import { parseStatuslineClientArgs } from "../dist/statusline-client.js";
 
 const execFileAsync = promisify(execFile);
@@ -138,6 +139,7 @@ describe("statusline client", () => {
 
   it("materializes width-specific collector statuslines from the collector snapshot", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-width-materialize-"));
+    const statuslineAttentionLimit = getDefaults().display.statuslineAttentionLimit;
     const now = Date.now();
     await writeCollectorHealth(
       {
@@ -150,7 +152,7 @@ describe("statusline client", () => {
         version: "test",
         snapshotTtlMs: 10_000,
         statuslineTtlMs: 10_000,
-        statuslineAttentionLimit: 5,
+        statuslineAttentionLimit,
       },
       root,
     );
@@ -183,7 +185,13 @@ describe("statusline client", () => {
       },
     );
 
-    const widthStatusline = await readCollectorStatusline("tmux-badges", 5, 120, 10_000, root);
+    const widthStatusline = await readCollectorStatusline(
+      "tmux-badges",
+      statuslineAttentionLimit,
+      120,
+      10_000,
+      root,
+    );
     assert.equal(widthStatusline?.value, first.stdout.trim());
 
     await unlink(collectorSnapshotFile(root));
@@ -209,10 +217,15 @@ describe("statusline client", () => {
 
   it("rebuilds a stale width-specific collector statusline from the current snapshot", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-width-refresh-"));
-    await writeCollectorStatusline("tmux-badges", 5, 214, "AI:0", root);
+    const statuslineAttentionLimit = getDefaults().display.statuslineAttentionLimit;
+    await writeCollectorStatusline("tmux-badges", statuslineAttentionLimit, 214, "AI:0", root);
     const now = Date.now();
     const staleSec = (now - 60_000) / 1000;
-    await utimes(collectorStatuslineFile("tmux-badges", 5, 214, root), staleSec, staleSec);
+    await utimes(
+      collectorStatuslineFile("tmux-badges", statuslineAttentionLimit, 214, root),
+      staleSec,
+      staleSec,
+    );
     await writeCollectorHealth(
       {
         pid: 5555,
@@ -224,7 +237,7 @@ describe("statusline client", () => {
         version: "test",
         snapshotTtlMs: 10_000,
         statuslineTtlMs: 10_000,
-        statuslineAttentionLimit: 5,
+        statuslineAttentionLimit,
       },
       root,
     );
@@ -258,7 +271,13 @@ describe("statusline client", () => {
     );
 
     assert.notEqual(stdout.trim(), "AI:0");
-    const widthStatusline = await readCollectorStatusline("tmux-badges", 5, 214, 10_000, root);
+    const widthStatusline = await readCollectorStatusline(
+      "tmux-badges",
+      statuslineAttentionLimit,
+      214,
+      10_000,
+      root,
+    );
     assert.equal(widthStatusline?.value, stdout.trim());
   });
 });
