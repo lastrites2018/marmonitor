@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  resolveSummaryPopupRenderLayout,
+  resolveSummaryPopupSize,
+} from "../dist/summary-popup/layout.js";
+import {
   buildSummaryPopupDerivation,
   buildSummaryPopupPage,
   buildSummaryPopupSections,
@@ -195,6 +199,26 @@ describe("summary popup item selection", () => {
 });
 
 describe("summary popup render", () => {
+  it("derives popup size from the tmux client bounds", () => {
+    assert.deepEqual(resolveSummaryPopupSize(80, 20), { width: 60, height: 14 });
+    assert.deepEqual(resolveSummaryPopupSize(240, 60), { width: 140, height: 28 });
+  });
+
+  it("reduces popup page size on shorter terminals", () => {
+    assert.deepEqual(resolveSummaryPopupRenderLayout("agent:codex", 28), {
+      pageSize: 7,
+      controlsMode: "full",
+    });
+    assert.deepEqual(resolveSummaryPopupRenderLayout("agent:codex", 18), {
+      pageSize: 4,
+      controlsMode: "compact",
+    });
+    assert.deepEqual(resolveSummaryPopupRenderLayout("issue", 14), {
+      pageSize: 2,
+      controlsMode: "minimal",
+    });
+  });
+
   it("renders a title and numbered session lines", () => {
     const text = renderSummaryPopup(
       [
@@ -301,6 +325,7 @@ describe("summary popup render", () => {
       "agent:codex",
       2,
       10,
+      { controlsMode: "full" },
     );
 
     assert.match(text, /^Codex Sessions \(12\) {2}\[Page 2\/2\]/);
@@ -338,6 +363,7 @@ describe("summary popup render", () => {
       "issue",
       2,
       10,
+      { controlsMode: "full" },
     );
 
     assert.match(text, /^Sessions Needing Review \(12\) {2}\[Page 2\/2\]/);
@@ -346,5 +372,69 @@ describe("summary popup render", () => {
     assert.match(text, /\n\nUnresolved AI Processes \(1\)\n\n2\. ⚠ Claude orphan/);
     assert.match(text, /\n\n1-2 select {2}• {2}Enter open {2}• {2}n\/p page {2}• {2}q close$/);
     assert.doesNotMatch(text, /transient/);
+  });
+
+  it("renders a compact footer on mid-height popups", () => {
+    const text = renderSummaryPopupPage(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/repo-1",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 1,
+        },
+      ],
+      "agent:codex",
+      1,
+      6,
+      { controlsMode: "compact" },
+    );
+
+    assert.match(text, /\n\n1-1 select {2}• {2}q close$/);
+    assert.doesNotMatch(text, /Enter open/);
+  });
+
+  it("renders a minimal footer on very short popups", () => {
+    const text = renderSummaryPopupPage(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/repo-1",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 1,
+        },
+        {
+          pid: 2,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/repo-2",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 2,
+        },
+        {
+          pid: 3,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/repo-3",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 3,
+        },
+        {
+          pid: 4,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/repo-4",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 4,
+        },
+      ],
+      "agent:codex",
+      1,
+      3,
+      { controlsMode: "minimal" },
+    );
+
+    assert.match(text, /\n\n1-3 {2}• {2}n\/p {2}• {2}q$/);
+    assert.doesNotMatch(text, /Enter open/);
+    assert.doesNotMatch(text, /select/);
   });
 });

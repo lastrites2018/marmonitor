@@ -1,5 +1,6 @@
 import { buildStatuslinePathLabels, formatElapsedCompact, shortenPath } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
+import type { SummaryPopupControlsMode } from "./layout.js";
 import { buildSummaryPopupDerivation, buildSummaryPopupPage, summaryPopupTitle } from "./model.js";
 import type { SummaryPopupTarget } from "./shared.js";
 
@@ -79,9 +80,19 @@ function formatPageWindow(
   return `Showing ${start}-${end} of ${totalItems}`;
 }
 
-function formatPageControls(itemCount: number, totalPages: number): string {
+function formatPageControls(
+  itemCount: number,
+  totalPages: number,
+  mode: SummaryPopupControlsMode,
+): string {
   const jumpLabel = itemCount >= 10 ? "1-9, 0=10" : `1-${itemCount}`;
   const pagingLabel = totalPages > 1 ? "  •  n/p page" : "";
+  if (mode === "minimal") {
+    return totalPages > 1 ? `${jumpLabel}  •  n/p  •  q` : `${jumpLabel}  •  q`;
+  }
+  if (mode === "compact") {
+    return `${jumpLabel} select${pagingLabel}  •  q close`;
+  }
   return `${jumpLabel} select  •  Enter open${pagingLabel}  •  q close`;
 }
 
@@ -90,6 +101,7 @@ export function renderSummaryPopupPage(
   target: SummaryPopupTarget,
   page: number,
   pageSize = 10,
+  options: { controlsMode?: SummaryPopupControlsMode } = {},
 ): string {
   const popupPage = buildSummaryPopupPage(agents, target, page, { pageSize });
   const title = formatPageHeader(popupPage.title, popupPage.page, popupPage.totalPages);
@@ -101,7 +113,11 @@ export function renderSummaryPopupPage(
     popupPage.items.length,
     popupPage.totalItems,
   );
-  const controls = formatPageControls(popupPage.items.length, popupPage.totalPages);
+  const controls = formatPageControls(
+    popupPage.items.length,
+    popupPage.totalPages,
+    options.controlsMode ?? "full",
+  );
 
   if (target !== "issue") {
     const labels = buildStatuslinePathLabels(popupPage.items, 32);

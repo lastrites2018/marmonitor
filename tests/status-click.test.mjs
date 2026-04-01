@@ -8,6 +8,7 @@ import {
   findClickedAgent,
   parseStatusClickArgs,
   parseStatusClickTarget,
+  parseTmuxClientSize,
   resolveSummaryClickAction,
 } from "../dist/status-click.js";
 
@@ -117,16 +118,27 @@ describe("status click helper", () => {
       "phase:thinking",
       "/tmp/marmonitor.json",
       "/dev/ttys040",
+      { width: 120, height: 24 },
     );
 
     assert.equal(args[0], "display-popup");
     assert.equal(args.includes("-E"), true);
-    assert.deepEqual(args.slice(1, 8), ["-E", "-w", "70%", "-h", "70%", "-c", "/dev/ttys040"]);
+    assert.deepEqual(args.slice(1, 8), ["-E", "-w", "120", "-h", "24", "-c", "/dev/ttys040"]);
     assert.match(args.at(-1), /popup/);
     assert.match(args.at(-1), /--summary-target/);
     assert.match(args.at(-1), /--interactive/);
     assert.doesNotMatch(args.at(-1), /--collector-only/);
     assert.match(args.at(-1), /--target-client/);
+  });
+
+  it("falls back to percentage sizing when popup size is unavailable", () => {
+    const args = buildSummaryPopupTmuxArgs("agent:claude");
+    assert.deepEqual(args.slice(0, 6), ["display-popup", "-E", "-w", "70%", "-h", "70%"]);
+  });
+
+  it("parses tmux client size output into a bounded popup size", () => {
+    assert.deepEqual(parseTmuxClientSize("80\t20\n"), { width: 60, height: 14 });
+    assert.equal(parseTmuxClientSize("bad"), undefined);
   });
 
   it("builds a short message for empty summary targets", () => {

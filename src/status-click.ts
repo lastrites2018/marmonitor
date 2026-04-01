@@ -3,6 +3,7 @@ import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
 import { resolveCliEntrypoint } from "./collector/entrypoints.js";
 import { loadConfig, resolveConfigPath } from "./config/index.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { type SummaryPopupSize, resolveSummaryPopupSize } from "./summary-popup/layout.js";
 import { selectSummaryPopupItems } from "./summary-popup/model.js";
 import { loadSummaryPopupAgents } from "./summary-popup/service.js";
 import { type SummaryPopupTarget, parseSummaryRange } from "./summary-popup/shared.js";
@@ -132,6 +133,7 @@ export function buildSummaryPopupTmuxArgs(
   target: SummaryPopupTarget,
   configPath?: string,
   targetClient?: string,
+  popupSize?: SummaryPopupSize,
 ): string[] {
   const command = [
     process.execPath,
@@ -146,7 +148,14 @@ export function buildSummaryPopupTmuxArgs(
     .map(shellQuote)
     .join(" ");
 
-  const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
+  const args = [
+    "display-popup",
+    "-E",
+    "-w",
+    popupSize ? String(popupSize.width) : "70%",
+    "-h",
+    popupSize ? String(popupSize.height) : "70%",
+  ];
   if (targetClient) {
     args.push("-c", targetClient);
   }
@@ -154,12 +163,42 @@ export function buildSummaryPopupTmuxArgs(
   return args;
 }
 
+export function parseTmuxClientSize(raw: string | undefined): SummaryPopupSize | undefined {
+  if (!raw) return undefined;
+  const [widthText, heightText] = raw.trim().split("\t");
+  const width = Number.parseInt(widthText ?? "", 10);
+  const height = Number.parseInt(heightText ?? "", 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return resolveSummaryPopupSize(width, height);
+}
+
+function readTmuxClientSize(targetClient?: string): SummaryPopupSize | undefined {
+  try {
+    const args = ["display-message", "-p"];
+    if (targetClient) {
+      args.push("-c", targetClient);
+    }
+    args.push("#{client_width}\t#{client_height}");
+    const output = execFileSync("tmux", args, {
+      env: process.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return parseTmuxClientSize(output);
+  } catch {
+    return undefined;
+  }
+}
+
 function openSummaryPopup(
   target: SummaryPopupTarget,
   configPath?: string,
   targetClient?: string,
 ): boolean {
-  const args = buildSummaryPopupTmuxArgs(target, configPath, targetClient);
+  const popupSize = readTmuxClientSize(targetClient);
+  const args = buildSummaryPopupTmuxArgs(target, configPath, targetClient, popupSize);
   try {
     execFileSync("tmux", args, {
       stdio: "ignore",

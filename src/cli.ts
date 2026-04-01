@@ -38,6 +38,7 @@ import { scanAgents } from "./scanner/index.js";
 import { getProcessStartTime } from "./scanner/process.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { resolveSummaryPopupRenderLayout } from "./summary-popup/layout.js";
 import {
   buildSummaryPopupPage,
   selectSummaryPopupItem,
@@ -1019,8 +1020,15 @@ program
     let page = 1;
     while (true) {
       clearScreen();
-      const popupPage = buildSummaryPopupPage(agents, target, page, { pageSize: 10 });
-      console.log(renderSummaryPopupPage(agents, target, page, 10));
+      const popupLayout = resolveSummaryPopupRenderLayout(target, process.stdout.rows);
+      const popupPage = buildSummaryPopupPage(agents, target, page, {
+        pageSize: popupLayout.pageSize,
+      });
+      console.log(
+        renderSummaryPopupPage(agents, target, page, popupLayout.pageSize, {
+          controlsMode: popupLayout.controlsMode,
+        }),
+      );
       const maxSelectable = popupPage.items.length;
       if (maxSelectable === 0) {
         return;
