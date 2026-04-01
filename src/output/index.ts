@@ -23,6 +23,7 @@ import {
   compactDirLabel,
   formatElapsed,
   formatTokens,
+  makeTmuxSummaryRange,
   joinLeftAndRightRail,
   selectIdleSessionsForRightRail,
   serializeWeztermPills,
@@ -32,6 +33,10 @@ import {
 
 export interface StatuslineRenderOptions {
   tmuxBadgeStyle?: TmuxBadgeStyle;
+}
+
+export function requiresSystemInfoForStatusline(format: StatuslineFormat): boolean {
+  return format === "compact" || format === "standard" || format === "extended";
 }
 
 /** Collect system resource info */
@@ -528,7 +533,6 @@ export async function renderStatusline(
       return format === "wezterm-pills" ? renderUnavailableStatusline(format) : "AI:0";
     }
 
-    const sys = await getSystemInfo();
     const summarySelections = buildSummaryPopupSelections(agents);
     const waitingCount = summarySelections.itemsByTarget["phase:permission"].length;
     const stalledCount = alive.filter((a) => a.status === "Stalled").length;
@@ -552,8 +556,6 @@ export async function renderStatusline(
       claudeCount,
       codexCount,
       geminiCount,
-      cpuPercent: sys.cpuPercent,
-      memoryUsedGb: sys.memoryUsedGb,
     };
 
     if (format === "tmux-badges") {
@@ -568,7 +570,11 @@ export async function renderStatusline(
         width,
         width && width > 0 ? Math.max(0, width - visibleTextWidth(left) - 2) : 0,
       );
-      return joinLeftAndRightRail(left, right, width);
+      return joinLeftAndRightRail(
+        left,
+        right ? makeTmuxSummaryRange("idle", right) : undefined,
+        width,
+      );
     }
 
     if (format === "wezterm-pills") {
@@ -576,7 +582,15 @@ export async function renderStatusline(
       return serializeWeztermPills(snapshot, focusText);
     }
 
-    return buildStatuslineSummary(snapshot, format);
+    const sys = requiresSystemInfoForStatusline(format) ? await getSystemInfo() : undefined;
+    return buildStatuslineSummary(
+      {
+        ...snapshot,
+        cpuPercent: sys?.cpuPercent,
+        memoryUsedGb: sys?.memoryUsedGb,
+      },
+      format,
+    );
   });
 }
 

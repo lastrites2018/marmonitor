@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderStatusline, renderUnavailableStatusline } from "../dist/output/index.js";
+import {
+  renderStatusline,
+  renderUnavailableStatusline,
+  requiresSystemInfoForStatusline,
+} from "../dist/output/index.js";
 
 describe("renderUnavailableStatusline", () => {
   it("returns plain fallback for default formats", () => {
@@ -13,6 +17,16 @@ describe("renderUnavailableStatusline", () => {
       renderUnavailableStatusline("wezterm-pills"),
       "focus\tmarmonitor unavailable\t#bac2de\t#313244",
     );
+  });
+});
+
+describe("requiresSystemInfoForStatusline", () => {
+  it("fetches system metrics only for text formats that render them", () => {
+    assert.equal(requiresSystemInfoForStatusline("compact"), true);
+    assert.equal(requiresSystemInfoForStatusline("standard"), true);
+    assert.equal(requiresSystemInfoForStatusline("extended"), true);
+    assert.equal(requiresSystemInfoForStatusline("tmux-badges"), false);
+    assert.equal(requiresSystemInfoForStatusline("wezterm-pills"), false);
   });
 });
 
@@ -53,7 +67,7 @@ describe("renderStatusline idle right rail", () => {
     const text = await renderStatusline(agents, "tmux-badges", 5, 180, {
       tmuxBadgeStyle: "plain",
     });
-    assert.match(text, /idle Cl1 Cx1 \| marmonitor · roam-new$/);
+    assert.match(text, /#\[range=user\|sum:idle]idle Cl1 Cx1 \| marmonitor · roam-new#\[norange]$/);
   });
 
   it("hides the idle right rail on narrow tmux-badges widths", async () => {
