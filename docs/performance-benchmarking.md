@@ -3,6 +3,7 @@
 목적
 - scanner/statusline 성능 변경을 감각이 아니라 재현 가능한 숫자로 비교한다.
 - `JSONL 파싱 비용`과 `실제 tmux statusline 실행 비용`을 같은 숫자로 뭉개지 않고 분리해서 본다.
+- 성능 변경은 benchmark로 실제 개선이 확인될 때만 유지하고, 개선이 없으면 복잡도를 늘리지 않는다.
 
 왜 벤치마크를 둘로 나눴는가
 - `Codex synthetic benchmark`는 재현 가능한 fixture 기반 측정이다.
@@ -112,6 +113,26 @@
 1. `npm run bench:codex-index -- --json`로 fixture 기반 숫자를 캡처한다.
 2. 실제 tmux 세션 안에서 `npm run bench:statusline-live -- --json`를 실행한다.
 3. PR이나 이슈에는 두 결과를 함께 적되, fixture profile과 runtime 환경을 같이 적는다.
+
+최적화 반영 규칙
+- 최적화 변경은 먼저 목표 경로를 하나 고른다.
+  - 예: `collector mode warm`, `collector mode forced-miss`, `direct cold`
+- 목표 경로를 정하지 못하면 그 변경은 반영하지 않는다.
+- benchmark는 항상 전후 비교로 본다.
+  - "한 번 찍어보니 빨라 보였다"는 근거가 아니다.
+- 목표 경로에서 개선이 없으면, 코드가 더 복잡해졌더라도 그 최적화는 유지하지 않는다.
+- 목표 경로가 아닌 다른 수치가 좋아졌다는 이유로 정당화하지 않는다.
+  - 예: 상태줄 hot path를 바꾸면서 synthetic parser 수치만 좋아진 경우
+- 실시간 경로 최적화는 분산도 함께 본다.
+  - 평균이 조금 좋아져도 최악값이나 흔들림이 커지면 재검토한다.
+
+실무 기준
+- statusline/collector 계열은 보통 아래 중 하나가 좋아져야 한다.
+  - warm
+  - stale-served
+  - forced-miss
+- cold path 최적화는 그 자체로 의미가 있을 수 있지만, hot path를 희생하면서까지 우선하지 않는다.
+- 개선 폭이 너무 작고 코드만 복잡해지면, 그 최적화는 넣지 않는 쪽이 맞다.
 
 대안 검토
 - `tests/perf.benchmark.mjs`로 넣는 대안도 있었지만, CI 테스트와 host-dependent live benchmark를 섞으면 flaky해진다.

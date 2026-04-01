@@ -1,0 +1,31 @@
+issue popup 영어 카피 추천안
+
+목적
+- `⚠` popup의 사용자-facing 영어 문구를 내부 구현 용어보다 더 설명 가능한 표현으로 정리한다.
+- 대상은 popup heading, section heading, empty state, controls/help text다.
+
+최종 추천 세트
+
+1. Popup heading
+- `Sessions Needing Review (N)`
+
+2. Section headings
+- `Inactive for a While (N)`
+- `Unresolved AI Processes (N)`
+
+3. Empty state
+- `Nothing to review right now.`
+
+4. Popup controls/help text
+- `1-9 select  •  Enter open  •  n/p page  •  q close`
+
+판단 이유
+- `Issue Sessions`보다 `Sessions Needing Review`가 더 자연스럽고 행동 유도력이 있다.
+- `Stalled`는 내부 구현 용어에 가깝고, `Inactive for a While`가 사용자 해석에 더 가깝다.
+- `Unmatched`는 내부 용어라서 `Unresolved AI Processes`가 더 설명적이다.
+- empty state는 문제 없음만 짧게 알려 주는 것이 가장 좋다.
+- controls 문구는 chooser 역할을 분명히 드러내되 과하게 길지 않게 유지한다.
+
+비고
+- 다른 summary popup (`Claude Sessions`, `Thinking Sessions` 등)은 현 상태를 유지해도 된다.
+- 1차 적용 범위는 `issue` popup surface 중심으로 두는 것이 가장 안전하다.

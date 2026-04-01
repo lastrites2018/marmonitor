@@ -39,7 +39,7 @@ describe("renderStatusline idle right rail", () => {
       cwd: "/Users/macrent/work/marmonitor",
       status: "Idle",
       lastActivityAt: now - 30,
-      idleSince: now - 10 * 60,
+      idleSince: now - 11 * 60,
       cpuPercent: 0,
       memoryMb: 100,
     },
@@ -71,7 +71,7 @@ describe("renderStatusline idle right rail", () => {
     });
     assert.match(
       text,
-      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor 10m#\[norange] · #\[range=user\|pid:11]roam-new 20m#\[norange]$/,
+      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor 11m#\[norange] · #\[range=user\|pid:11]roam-new 20m#\[norange]$/,
     );
   });
 
@@ -112,8 +112,8 @@ describe("renderStatusline idle right rail", () => {
           cwd: "/Users/macrent/work/fmbattle",
           status: "Idle",
           phase: "thinking",
-          lastActivityAt: now - 10 * 60,
-          idleSince: now - 10 * 60,
+          lastActivityAt: now - 11 * 60,
+          idleSince: now - 11 * 60,
           cpuPercent: 0,
           memoryMb: 100,
         },

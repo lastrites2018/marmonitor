@@ -1,0 +1,141 @@
+summary popup UX 메모
+
+목적
+- summary badge popup의 현재 UX 상태를 실제 구현 기준으로 정리하고, 다음 개선 포인트를 좁힌다.
+
+현재 UX 상태
+- summary badge 클릭 시 popup이 열린다.
+- popup은 이미 interactive chooser로 동작한다.
+- popup 내부에서 번호 입력으로 jump 가능하다.
+- `⚠` popup은 `Stalled / Unmatched / Risk` 섹션 구조를 가진다.
+- 이후 문서 기준은 `Risk`를 UI에서 숨기고, `⚠`를 `오래 멈춘 세션 + persistent unmatched`로 단순화하는 것이다.
+- 즉 현재의 핵심 갭은 "popup을 열 수 있느냐"가 아니라 "popup이 얼마나 읽기 쉽고 예측 가능한가"다.
+
+핵심 판단
+- statusline은 계속 요약에 집중하고, popup은 요약을 해석하고 행동으로 연결하는 역할을 맡는 것이 맞다.
+- 현재 구조는 이 분리를 이미 상당 부분 달성했다.
+- 앞으로의 UX 개선은 statusline을 더 복잡하게 만드는 방향보다 popup 품질을 높이는 방향이어야 한다.
+
+1. 상태줄은 요약, popup은 해석 + 행동
+
+원칙
+- statusline:
+  - 짧고 즉각적
+  - "무엇이 있는가"를 보여줌
+- popup:
+  - "왜 그런가"
+  - "무엇을 할 수 있는가"
+  - "어디로 갈 수 있는가"
+  를 보여줌
+
+판단
+- 현재 summary badge -> popup chooser 구조는 이 원칙과 잘 맞는다.
+- summary badge를 더 장식하거나 statusline에 더 많은 정보를 얹는 것은 우선순위가 낮다.
+
+2. popup은 이미 chooser다. 이제 중요한 것은 chooser 품질이다
+
+이미 구현된 점
+- 번호 선택 jump
+- `Enter=1`
+- `n/p` page
+- `q close`
+
+남은 UX 질문
+- page 단위 numbering이 충분히 직관적인가
+- `0=10` 규칙이 설명 없이도 예측 가능한가
+- popup 안에서 현재 선택 가능한 개수가 적을 때도 controls 문구가 과하지 않은가
+
+판단
+- 지금 단계의 중심은 "chooser 추가"가 아니다.
+- 중심은 "현재 chooser가 실제 사용에서 덜 헷갈리게 보이느냐"다.
+
+3. `⚠`는 popup에서 의미를 복원해야 한다
+
+현재 상태
+- statusline에서는 `⚠ n`으로 압축
+- popup에서는 현재 `Stalled / Unmatched / Risk` 섹션 구조 사용
+- 이후 기준은 `Risk`를 숨기고 `Stalled / persistent unmatched`만 남기는 것이다.
+
+좋은 점
+- statusline은 얇게 유지되고, popup에서 의미를 복원하는 구조가 맞다.
+
+남은 UX 갭
+- transient unmatched를 `120초` grace period로 숨기는 기준
+- `Risk` placeholder를 UI에서 제거하는 방식
+- `Stalled`와 `Unmatched` 중 무엇이 더 먼저 보여야 하는지
+- 섹션별 설명 문구가 필요한지
+
+내 판단
+- 현재 구조는 맞다.
+- 다음 단계는 의미 체계를 더 추가하는 것이 아니라, `⚠`를 더 좁고 설명 가능한 bucket으로 줄이는 것이다.
+
+4. clickable discoverability는 여전히 약하다
+
+문제
+- tmux statusline에는 hover affordance가 없다.
+- 사용자는 summary badge와 detail item이 clickable이라는 사실을 모를 수 있다.
+
+권장 방향
+- 시각 장식을 더 넣는 것보다 help/doc/banner로 안내하는 편이 낫다.
+- 현재 plain statusline 미학을 깨지 않는 것이 더 중요하다.
+
+추천 문구 예시
+- `tmux statusline summary/detail items are clickable`
+- `summary badge opens popup, detail item jumps directly`
+
+5. popup 목록은 현재 충분히 유용하지만, 중복 상황에서는 더 좋아질 여지가 있다
+
+문제
+- 같은 repo에서 여러 세션이 뜨면 flat list가 길어질 수 있다.
+
+지금 당장 하지 않을 것
+- 강한 grouping UI
+- nested menu
+- popup 안 검색
+
+이유
+- chooser 복잡도를 올리면 현재의 "빠르게 보고 바로 jump" 감각이 깨질 수 있다.
+
+권장 방향
+- 실제 사용에서 정말 거슬릴 때만 grouping / dedupe를 붙인다.
+- 1차 후보는 repo 단위 label 정리이지, 구조적 UI 확장이 아니다.
+
+6. direct jump와 popup jump의 역할 분리는 현재도 유효하다
+
+유지할 규칙
+- 상세 attention item:
+  - 이미 구체적인 대상이므로 direct jump
+- summary badge:
+  - 범주 정보이므로 popup chooser
+
+판단
+- 이 구분은 UX상 안정적이다.
+- summary badge까지 direct jump를 걸 필요는 없다.
+
+7. statusline의 다음 UX 개선은 popup보다 active noise 쪽일 수 있다
+
+현재 상태
+- stale thinking/tool 강등은 이미 반영되었다.
+- active `•` 표식도 제거되었다.
+
+남은 문제
+- 같은 repo 중복
+- 오래된 active가 top 영역에 남는 현상
+
+판단
+- summary popup UX를 더 크게 바꾸기보다, statusline top list의 noise를 줄이는 쪽이 더 실용적일 수 있다.
+
+8. 현재 기준 추천 UX 우선순위
+
+1. summary/detail clickable 안내 문구 추가
+2. `⚠` popup heading / persistent unmatched 기준 / empty-risk 제거 정리
+3. chooser controls 문구와 page numbering 점검
+4. active / duplicate noise 축소
+5. 그 이후에만 grouping / dedupe 재검토
+
+메타 결론
+- summary popup UX는 "없는 기능"이 아니라 "이미 동작하는 chooser"다.
+- 지금부터의 UX 개선은 popup을 새로 만드는 것이 아니라,
+  - 덜 헷갈리게 만들고
+  - 의미를 더 선명하게 만들고
+  - statusline 쪽 noise를 줄이는 방향이어야 한다.

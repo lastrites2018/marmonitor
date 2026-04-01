@@ -1,0 +1,190 @@
+summary badge popup 계획 및 현황
+
+목적
+- tmux statusline의 summary badge를 클릭했을 때, 해당 badge가 의미하는 세션만 모아서 popup으로 보여준다.
+- 기존 상세 attention 항목의 `pid` direct click-to-jump는 유지한다.
+- 클릭 해석, 세션 필터링, popup 렌더링, tmux side effect를 분리해서 유지한다.
+
+현재 구현 상태
+- summary badge 클릭 -> popup 열기: 완료
+- popup 내부 번호 선택 jump: 완료
+- popup 페이지 이동(`n`/`p`)과 종료(`q`/`Esc`): 완료
+- `⚠` popup의 `Stalled / Unmatched / Risk` 섹션 분리: 부분 완료
+  - `Stalled`, `Unmatched`는 실제 데이터로 렌더링됨
+  - `Risk`는 섹션 자리는 있으나 현재 실데이터는 비어 있음
+  - 이후 문서 기준은 `⚠ = stalled + persistent unmatched`이며, `Risk`는 UI에서 보이지 않게 두는 쪽으로 정리
+- tmux statusline click 경로의 collector-only popup open: 완료
+- 수동 CLI popup의 live fallback 허용: 현재 유지 중
+
+핵심 흐름
+- `sum:*` range -> `marmonitor-status-click` -> `tmux display-popup`
+- popup 내부 명령:
+  - `marmonitor popup --summary-target <target> --interactive --collector-only`
+- 따라서 tmux에서 summary badge를 클릭할 때는 새 live scan 없이 collector snapshot만 사용한다.
+
+이미 완료된 구현 단위
+- `SummaryPopupTarget` 모델
+- `parseSummaryPopupTarget()`
+- `parseSummaryRange()` / `serializeSummaryRange()`
+- `selectSummaryPopupItems()`
+- `selectSummaryPopupItem()`
+- `buildSummaryPopupSelections()`
+- `buildSummaryPopupSections()`
+- `buildSummaryPopupPage()`
+- `renderSummaryPopup()`
+- `renderSummaryPopupPage()`
+- `marmonitor popup --summary-target <target>`
+- `--interactive`
+- `--collector-only`
+- statusline summary badge의 `sum:*` clickable range
+- tmux click routing에서 `pid:*`, `sum:*`, `back` 처리
+
+현재 지원 범위
+
+clickable summary badge
+- `Cl`
+- `Cx`
+- `Gm`
+- `⏳`
+- `🤔`
+- `🔧`
+- `⚠`
+
+non-clickable 유지
+- `✅`
+- `AI`
+
+popup target 의미
+- `agent:claude` -> alive Claude 세션
+- `agent:codex` -> alive Codex 세션
+- `agent:gemini` -> alive Gemini 세션
+- `phase:permission` -> `phase === permission`
+- `phase:thinking` -> attention 규칙상 유효한 recent thinking
+- `phase:tool` -> attention 규칙상 유효한 recent tool
+- `issue`
+  - 현재 구현: `Stalled + Unmatched + empty Risk placeholder`
+  - 이후 문서 기준: `Stalled + persistent unmatched`
+
+현재 상호작용
+- summary badge 클릭 -> interactive popup chooser open
+- popup 내부:
+  - `1-9` 선택 jump
+  - `0` -> 10번 jump
+  - `Enter` -> 1번 jump
+  - `n` / `p` -> page 이동
+  - `q` / `Esc` -> close
+- jump는 기존 `jumpToAgentWithAnchor()` semantics를 재사용한다.
+
+핵심 설계 원칙
+- summary badge 의미와 popup 결과는 정확히 일치해야 한다.
+- visual style(`plain`, `minimal`, `pill`)와 클릭 의미는 분리한다.
+- 기존 `pid` direct jump를 깨지 않는다.
+- tmux click 경로에서는 popup 때문에 새 scan을 돌리지 않는다.
+
+데이터 계약
+
+현재 계약
+- tmux summary click:
+  - collector snapshot only
+  - collector unhealthy면 popup open 실패
+  - live scan fallback 없음
+- 수동 CLI:
+  - 기본은 collector 우선
+  - collector가 없으면 `light` live snapshot fallback 가능
+  - `--collector-only`를 주면 fallback 금지
+
+이 구분이 중요한 이유
+- tmux statusline click은 latency-sensitive 경로다.
+- 따라서 여기서는 collector-only가 맞다.
+- 반대로 수동 CLI popup은 디버깅/운영 도구 성격이 있으므로, 현재는 fallback 허용이 실용적이다.
+
+현재 남은 범위
+
+1. popup 데이터 계약을 더 명확히 고정
+- tmux 경로는 이미 collector-only다.
+- 남은 판단:
+  - 수동 `marmonitor popup`도 기본 collector-only로 바꿀지
+  - 아니면 현재처럼 manual fallback을 유지할지
+- 문서/도움말에서 이 차이를 더 명확히 드러낼 필요가 있다.
+
+2. `⚠`의 범주 단순화
+- 문서 기준은 `Risk`를 UI에서 숨기고, `issue`를 `stalled + persistent unmatched`로 좁히는 쪽이다.
+- 남은 것은:
+  - `persistent unmatched`의 grace period를 `120초`로 고정하고
+  - popup heading / empty-state를 이 기준에 맞게 정리하는 일이다.
+
+3. popup 내부 grouping / dedupe
+- 같은 repo나 같은 종류의 세션이 많을 때, 현재는 flat list다.
+- 실제 사용 후 필요성이 확인되면 grouping 또는 dedupe를 붙인다.
+
+4. `✅`, `AI` clickable 여부 재평가
+- 지금은 의도적으로 제외했다.
+- popup 가치보다 noise가 더 크다고 판단한 상태다.
+- 이후 실제 사용 데이터로 재평가할 수 있다.
+
+5. popup 도움말 / discoverability 정리
+- 기능은 이미 있지만, 사용자가 summary badge가 clickable인지 알기 어렵다.
+- tmux help/banner/doc 문구 보강이 남아 있다.
+
+책임 분리
+
+1. target model
+- `SummaryPopupTarget`
+- click된 badge의 의미를 표현
+
+2. selection model
+- `buildSummaryPopupSelections()`
+- `selectSummaryPopupItems()`
+- `buildSummaryPopupSections()`
+- `buildSummaryPopupPage()`
+
+3. render
+- `renderSummaryPopup()`
+- `renderSummaryPopupPage()`
+
+4. side effect
+- `status-click`
+- tmux popup open
+- popup 내부 jump
+
+현재 구현 파일 기준
+- `src/summary-popup/shared.ts`
+- `src/summary-popup/model.ts`
+- `src/summary-popup/render.ts`
+- `src/summary-popup/service.ts`
+- `src/status-click.ts`
+- `src/cli.ts`
+
+테스트 기준
+- range 파싱
+- summary target 파싱
+- target별 selection
+- `⚠` section split
+- page 계산
+- page render
+- click helper의 popup args
+- interactive popup command
+
+현재 문서 기준으로 "완료"로 봐야 하는 것
+- summary badge clickable
+- filtered popup open
+- popup chooser 입력 루프
+- popup 내부 direct jump
+- `⚠`의 stalled/unmatched 분리
+- tmux click의 collector-only popup 경로
+
+현재 문서 기준으로 "다음 단계"로 남겨야 하는 것
+- `persistent unmatched` 기준의 세부 문구 정리
+- `Risk` UI 비노출 정리
+- popup grouping / dedupe
+- discoverability 개선
+- manual CLI popup의 data contract 재결정
+- `✅`, `AI` 클릭 여부 재평가
+
+메타 결론
+- summary popup은 더 이상 "계획 단계"가 아니라 "이미 동작하는 기능"이다.
+- 지금부터의 계획은 popup을 새로 여는 것이 아니라,
+  - collector-only 계약을 어디까지 강제할지,
+  - `⚠`를 얼마나 더 단순하고 설명 가능하게 만들지,
+  - popup 목록을 얼마나 더 읽기 좋게 다듬을지
+  를 정하는 것이다.

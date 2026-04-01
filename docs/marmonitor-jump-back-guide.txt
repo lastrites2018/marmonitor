@@ -1,0 +1,108 @@
+jump-back 기능 안내
+
+개요
+- `jump-back`은 marmonitor로 다른 세션이나 pane으로 이동한 뒤,
+  "첫 jump 전 원래 보던 위치"로 돌아가기 위한 기능이다.
+- 이 기능은 직전 위치를 한 단계씩 되짚는 stack 방식이 아니다.
+- 기준은 항상 "현재 tmux client에서 첫 jump가 일어나기 전 위치"다.
+
+핵심 동작
+- 현재 화면에서 marmonitor jump가 처음 실행되면, 그 직전 위치를 anchor로 저장한다.
+- 이후 같은 화면에서 여러 번 더 jump해도 anchor는 바뀌지 않는다.
+- `jump-back`을 실행하면 그 anchor로 복귀한다.
+- 복귀가 성공하면 anchor는 지워진다.
+
+예시
+- A에서 작업 중
+- `marmonitor jump`로 B 이동
+- 다시 `marmonitor jump`로 C 이동
+- `jump-back` 실행
+- 결과: `C -> A`
+- 결과가 `C -> B`는 아니다.
+
+언제 anchor가 기록되는가
+- 아래처럼 marmonitor가 주도하는 jump에서 기록된다.
+  - statusline 클릭 jump
+  - `marmonitor jump --pid <pid>`
+  - `marmonitor jump --attention`
+  - `marmonitor jump --attention-index <n>`
+
+언제 anchor가 기록되지 않는가
+- 일반 statusline 렌더링
+- attention/jump 목록 조회만 하는 동작
+- 사용자의 수동 tmux 이동
+
+사용 방법
+1. 직접 명령 실행
+   - `marmonitor jump-back`
+
+2. 특정 tmux client를 지정해서 실행
+   - `marmonitor jump-back --client-tty /dev/ttys032`
+
+3. 현재 로컬 tmux 바인딩
+   - `Prefix+g`
+   - `F6`
+
+복귀 규칙
+- 원래 pane이 살아 있으면 pane으로 복귀
+- pane이 없고 window가 있으면 window로 복귀
+- window도 없고 session만 있으면 session으로 복귀
+- 원래 위치가 완전히 사라졌으면 복귀 실패로 처리하고 anchor를 정리한다
+
+상태줄 표시
+- 현재 tmux client에 active jump anchor가 있으면 상태줄 끝에 `↩` 표시가 붙는다.
+- 의미:
+  - 지금 이 화면에서 `jump-back`으로 돌아갈 원래 위치가 저장되어 있다
+- `jump-back` 성공 후에는 anchor가 지워지므로 `↩`도 사라진다.
+
+중요한 의미 정리
+- `jump-back`은 "이 화면에서 첫 jump 전 위치로 복귀"다.
+- "직전 jump 한 단계 뒤로 가기" 기능이 아니다.
+- 사용자가 중간에 수동으로 다른 pane/window로 이동해도, back 기준은 바뀌지 않는다.
+
+예시 1
+- A에서 시작
+- B로 jump
+- C로 jump
+- 수동으로 D로 이동
+- `jump-back`
+- 결과: A
+
+예시 2
+- A에서 시작
+- B로 jump
+- `jump-back`
+- 결과: A
+- 그 뒤 다시 E로 jump하면, 이제 새 anchor는 그 시점의 현재 위치를 기준으로 다시 잡힌다.
+
+anchor가 없을 때
+- 아직 이 화면에서 marmonitor jump가 한 번도 일어나지 않았다면 anchor가 없다.
+- 이 상태에서 `jump-back`을 실행하면 사실상 no-op이거나 안내 메시지만 출력된다.
+
+구현 기준
+- 내부적으로는 tmux client별 단일 anchor를 저장한다.
+- key는 가능하면 `client_id`를 쓰고,
+  tmux가 `client_id`를 비워 주는 환경에서는 `client_tty`를 fallback으로 쓴다.
+- 저장 위치는 temp 영역 아래 jump anchor 파일이다.
+
+운영 메모
+- 현재 구현은 stack/history browser가 아니다.
+- visual indicator는 최소한으로 유지한다.
+- statusline에는 작은 `↩`만 붙인다.
+- parseable output 형식에는 영향을 주지 않고, tmux statusline 경로에만 표시를 더한다.
+
+현재 로컬 tmux 연동 상태
+- statusline click jump 가능
+- `Prefix+g`로 jump-back 가능
+- `F6`로도 jump-back 가능
+- 상태줄에 `↩` indicator 표시 가능
+
+문제 확인 시 체크할 것
+1. 실제로 marmonitor jump가 먼저 실행되었는가
+2. 현재 화면이 같은 tmux client 문맥인가
+3. 원래 pane/window/session이 아직 살아 있는가
+4. 상태줄에 `↩`가 보이는가
+
+관련 문서
+- 설계 문서:
+  - `docs/marmonitor-jump-back-plan.txt`

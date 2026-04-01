@@ -36,11 +36,16 @@ function popupLine(index: number, agent: AgentSession, label: string): string {
   return `${headline}\n${detail}`;
 }
 
+function popupEmptyState(target: SummaryPopupTarget): string {
+  if (target === "issue") return "Nothing to review right now.";
+  return "No matching sessions.";
+}
+
 export function renderSummaryPopup(agents: AgentSession[], target: SummaryPopupTarget): string {
   const items = buildSummaryPopupSelections(agents).itemsByTarget[target];
   const title = summaryPopupTitle(target, items.length);
   if (items.length === 0) {
-    return `${title}\n\nNo matching sessions.`;
+    return `${title}\n\n${popupEmptyState(target)}`;
   }
 
   if (target !== "issue") {
@@ -80,8 +85,8 @@ function formatPageWindow(
 
 function formatPageControls(itemCount: number, totalPages: number): string {
   const jumpLabel = itemCount >= 10 ? "1-9, 0=10" : `1-${itemCount}`;
-  const pagingLabel = totalPages > 1 ? "  n/p page" : "";
-  return `Controls: ${jumpLabel}  Enter=1${pagingLabel}  q close`;
+  const pagingLabel = totalPages > 1 ? "  •  n/p page" : "";
+  return `${jumpLabel} select  •  Enter open${pagingLabel}  •  q close`;
 }
 
 export function renderSummaryPopupPage(
@@ -93,7 +98,7 @@ export function renderSummaryPopupPage(
   const popupPage = buildSummaryPopupPage(agents, target, page, { pageSize });
   const title = formatPageHeader(popupPage.title, popupPage.page, popupPage.totalPages);
   if (popupPage.totalItems === 0) {
-    return `${title}\n\nNo matching sessions.`;
+    return `${title}\n\n${popupEmptyState(target)}`;
   }
   const pageWindow = formatPageWindow(
     popupPage.startIndex,

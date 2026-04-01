@@ -1,0 +1,107 @@
+기능 개선 관점 메모
+
+목적
+- 현재 성능 최적화 이후 단계에서, marmonitor를 기능적으로 더 좋아지게 만들 수 있는 지점을 정리한다.
+- 초점은 성능 미세 최적화가 아니라 운영 신뢰성, UX, 상호작용 품질에 둔다.
+
+현재 상태 요약
+- statusline foreground 경로는 collector artifact 중심으로 단순화되었다.
+- 원래 문제였던 tmux statusline 갱신 시 입력 지연은 실사용 가능한 수준까지 완화되었다.
+- 따라서 다음 단계의 개선 우선순위는 성능보다 기능 품질이다.
+
+1. 운영 리스크 관점
+
+핵심 질문
+- collector가 비정상일 때 사용자가 바로 이해할 수 있는가?
+- artifact와 config가 어긋날 때 진단이 쉬운가?
+- 죽거나 stale한 collector가 있어도 회복 경로가 분명한가?
+
+개선 후보
+- stale/degraded 상태를 statusline에 작게 표시
+  - 예: MM stale, MM degraded
+  - 현재는 fallback은 되지만 사용자가 왜 결과가 이상한지 바로 알기 어렵다.
+
+- collector auto-restart
+  - 현재는 healthy면 빠르고, 죽으면 fallback으로 내려간다.
+  - stale health 감지 시 collector를 자동 재기동하면 운영 안정성이 좋아진다.
+
+- artifact/schema versioning
+  - health/snapshot/statusline artifact에 schema version을 넣는다.
+  - 향후 포맷 변경 시 이전 artifact와 섞여 생기는 문제를 줄일 수 있다.
+
+- config mismatch 가시화
+  - 현재는 config path mismatch면 조용히 fallback한다.
+  - 디버깅 관점에서는 원인 파악이 어렵다.
+
+판단
+- 운영 관점에서 가장 먼저 가치가 큰 것은 stale/degraded 상태를 사용자에게 드러내는 것이다.
+
+2. UX 리스크 관점
+
+핵심 질문
+- statusline의 정보량이 실제 행동으로 연결되는가?
+- 상태줄이 요약 역할을 유지하면서도 조작성이 충분한가?
+- 같은 repo나 비슷한 항목이 많을 때 읽기 쉬운가?
+
+개선 후보
+- summary badge 클릭 기능
+  - 현재는 attention 상세 항목만 클릭된다.
+  - 예:
+    - ⚠ 3 클릭 -> issue 세션만 모은 popup
+    - 🤔 2 클릭 -> thinking만 모은 popup
+    - Cl 4 클릭 -> Claude만 모은 popup
+  - 실제 사용성 개선 폭이 크다.
+
+- attention item grouping / dedupe
+  - 같은 repo에서 여러 세션이 뜨면 정보량은 많지만 분별력은 떨어진다.
+  - 예:
+    - roam-new x3
+    - 첫 항목만 자세히 보여주고 나머지는 접기
+
+- active 항목 규칙 재정의
+  - 현재 • 는 정보력이 가장 약하다.
+  - 옵션:
+    - 아이콘 제거
+    - recent-active만 유지
+    - 오래된 active는 top list에서 제외
+
+- 오래된 항목의 자동 탈락 규칙 강화
+  - thinking은 이미 개선했지만 active도 일정 시간 이후 top N에서 밀어낼 수 있다.
+
+- popup / dock / watch와 statusline의 역할 정리
+  - statusline은 요약만 맡기고, 자세한 상태는 popup에서 보여주도록 역할을 더 명확히 나눈다.
+
+판단
+- UX 관점에서 가장 먼저 체감이 큰 것은 summary badge 클릭 -> filtered popup 흐름이다.
+
+3. 앞으로의 개선 우선순위
+
+추천 순서
+1. degraded/stale 상태 표시
+2. summary badge 클릭 액션
+3. attention grouping / dedupe
+4. active 항목 규칙 재정의
+5. full status 쪽 collector 활용 여부 검토
+
+우선순위별 이유
+- degraded/stale 표시
+  - 운영 문제를 사용자가 바로 이해하게 만든다.
+  - 신뢰성과 디버깅 가능성에 직접 연결된다.
+
+- summary badge 클릭 액션
+  - 이미 attention 상세 항목 클릭이 있으므로 확장이 자연스럽다.
+  - 상호작용 측면에서 가장 가치가 크다.
+
+- attention grouping / dedupe
+  - 같은 프로젝트 중복이 많은 현재 사용 패턴에서 상태줄 가독성을 크게 개선할 수 있다.
+
+- active 항목 규칙 재정의
+  - • 항목의 의미가 약하므로 실제 사용 패턴을 보며 더 줄일 수 있다.
+
+- full status collector 활용
+  - 가능은 하지만 범위가 커진다.
+  - 현재 단계에서는 우선순위가 낮다.
+
+메타 결론
+- 지금은 성능보다 신뢰성 표시, 클릭 가능한 상호작용, 중복 정보 축약이 더 가치 있는 개선 포인트다.
+- 다음 단계의 핵심은 "더 빠르게"가 아니라 "더 이해되게, 더 바로 행동할 수 있게" 만드는 것이다.

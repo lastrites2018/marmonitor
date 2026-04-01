@@ -139,11 +139,11 @@ idle right rail 계획
 - `recent-complete`
   - 현재 `Idle`
   - 직전 의미 있는 상태가 `thinking` 또는 `tool`
-  - 최근 완료 시각이 `<= 5분`
+  - 최근 완료 시각이 `<= 10분`
 - `warm-idle`
   - 현재 `Idle`
   - `recent-complete`에는 해당하지 않음
-  - idle 또는 최근 activity 경과 시간이 `> 5분 && < 1시간`
+  - idle 또는 최근 activity 경과 시간이 `> 10분 && < 1시간`
 - `cold-idle`
   - 현재 `Idle`
   - idle 또는 최근 activity 경과 시간이 `>= 1시간`

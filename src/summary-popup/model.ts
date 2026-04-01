@@ -3,6 +3,7 @@ import {
   type AttentionItem,
   buildAttentionItems,
   isIdleRightRailCandidate,
+  isPersistentUnmatched,
 } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
 import type { SummaryPopupTarget } from "./shared.js";
@@ -13,7 +14,7 @@ export interface SummaryPopupSelections {
 }
 
 export interface SummaryPopupSection {
-  key: "all" | "stalled" | "unmatched" | "risk";
+  key: "all" | "stalled" | "unmatched";
   title: string;
   items: AgentSession[];
 }
@@ -127,7 +128,10 @@ export function buildSummaryPopupSelections(
       attentionKinds,
     ),
     issue: orderedSummaryItems(
-      agents.filter((agent) => agent.status === "Stalled" || agent.status === "Unmatched"),
+      agents.filter(
+        (agent) =>
+          agent.status === "Stalled" || isPersistentUnmatched(agent, { nowSec: options.nowSec }),
+      ),
       attentionKinds,
     ),
   } satisfies Record<SummaryPopupTarget, AgentSession[]>;
@@ -155,7 +159,7 @@ export function summaryPopupTitle(target: SummaryPopupTarget, count: number): st
     case "phase:tool":
       return `Tool Sessions (${count})`;
     case "issue":
-      return `Issue Sessions (${count})`;
+      return `Sessions Needing Review (${count})`;
   }
 }
 
@@ -180,19 +184,21 @@ export function buildSummaryPopupSections(
     selections.attentionKinds,
   );
   const unmatched = orderedSummaryItems(
-    agents.filter((agent) => agent.status === "Unmatched"),
+    agents.filter((agent) => isPersistentUnmatched(agent, { nowSec: options.nowSec })),
     selections.attentionKinds,
   );
-  const risk: AgentSession[] = [];
 
   return [
-    { key: "stalled" as const, title: `Stalled (${stalled.length})`, items: stalled },
+    {
+      key: "stalled" as const,
+      title: `Inactive for a While (${stalled.length})`,
+      items: stalled,
+    },
     {
       key: "unmatched" as const,
-      title: `Unmatched (${unmatched.length})`,
+      title: `Unresolved AI Processes (${unmatched.length})`,
       items: unmatched,
     },
-    { key: "risk" as const, title: `Risk (${risk.length})`, items: risk },
   ].filter((section) => section.items.length > 0);
 }
 

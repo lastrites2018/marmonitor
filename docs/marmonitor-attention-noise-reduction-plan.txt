@@ -4,17 +4,18 @@ attention noise 축소 계획
 - 2026-04-01: 1차 subset 반영
   - popup / jump / watch가 쓰는 원본 attention 후보는 유지
   - statusline 왼쪽 detail만 별도 projection을 사용
-  - `permission`, 최근 `thinking`, 최근 `tool`, 최근 `Idle` 완료 근사치만 유지
-  - 최근 `Idle` 완료 근사치는 같은 repo label끼리 collapse
-  - 현재 snapshot에는 직전 phase 이력이 없으므로, `recent-complete`는 "최근 활동이 있었던 Idle 세션"으로 근사
-  - `warm-idle` / `cold-idle`에 따른 right rail 재조정은 후속 과제로 남김
+  - `permission`, 최근 `thinking`, 최근 `tool`, 최근 `Idle` 완료만 유지
+  - 최근 `Idle` 완료는 같은 repo label끼리 collapse
+  - `recentCompleteAt`, `idleSince`가 실제 snapshot/session 필드로 반영됨
+  - `warm-idle` / `cold-idle`에 따른 right rail 재조정도 구현 반영됨
 - 2026-04-01: 구간 모델 명확화
   - active decay 중심 설명 대신 `recent-complete / warm-idle / cold-idle` 구간 모델을 기준으로 본다.
   - 기본 정책값은 아래를 사용한다.
-    - `recent-complete <= 5분`
-    - `warm-idle > 5분 && < 1시간`
-    - `cold-idle >= 1시간`
+    - `recent-complete <= 10분`
+  - `warm-idle > 10분 && < 1시간`
+  - `cold-idle >= 1시간`
   - 다만 진짜 중요한 기준은 "몇 분인가"보다 "어떤 이벤트를 기준으로 그 시간을 재는가"이다.
+  - 현재 구현은 full phase history가 아니라 이전 스캔 대비 전이 상태를 사용하므로, `recent-complete`는 정확한 전환 이벤트가 잡힌 세션에 대해서만 보장된다.
 
 목적
 - statusline 하단 왼쪽 attention 영역이 "지금 바로 대응해야 할 것"만 보여주도록 더 보수적으로 정제한다.
@@ -95,12 +96,12 @@ Simple Made Easy 기준 경계
 - 권장 정의:
   - 현재 `status === "Idle"`
   - 직전 의미 있는 상태가 `thinking` 또는 `tool`
-  - 최근 완료 시각이 `<= 5분`
+  - 최근 완료 시각이 `<= 10분`
 - 기본값:
-  - `recentCompleteMaxAgeSec = 300`
+  - `recentCompleteMaxAgeSec = 600`
 - 이 상태는 왼쪽 top detail에 남는다.
 - 중요:
-  - 단순히 `lastActivityAt <= 5분`으로 판정하면 안 된다.
+  - 단순히 `lastActivityAt <= 10분`으로 판정하면 안 된다.
   - `recent-complete`는 "최근에 반응이 있었던 idle"이 아니라, `thinking/tool -> idle` 전환이 최근에 있었던 세션이어야 한다.
   - 현재 snapshot 모델에 직전 phase 또는 전이 시각이 없으면, 이 분류는 근사치일 뿐이며 의미적으로는 완전하지 않다.
   - 전이 정보가 없는 상태에서는 과한 추정보다 보수적 누락이 더 낫다.
@@ -110,7 +111,7 @@ Simple Made Easy 기준 경계
 - 권장 정의:
   - `status === "Idle"`
   - `recent-complete`에는 해당하지 않음
-  - idle 또는 최근 activity 기준 경과 시간이 `> 5분 && < 1시간`
+  - idle 또는 최근 activity 기준 경과 시간이 `> 10분 && < 1시간`
 - 기본값:
   - `warmIdleMinAgeSec = 301`
   - `warmIdleMaxAgeSec = 3599`
@@ -271,7 +272,7 @@ function buildStatuslineAttentionRepresentatives(
 필수
 - permission은 기존처럼 상단 유지
 - recent thinking / tool은 계속 잘 보임
-- recent-complete는 5분 동안만 왼쪽 top detail 후보로 남음
+- recent-complete는 10분 동안만 왼쪽 top detail 후보로 남음
 - warm-idle은 오른쪽 rail에만 남고 왼쪽에서는 빠짐
 - cold-idle은 statusline surface에서 빠짐
 - 같은 repo recent-complete 중복은 statusline에서 줄어듦
@@ -288,8 +289,8 @@ function buildStatuslineAttentionRepresentatives(
 8. 테스트 계획
 
 단위 테스트
-- `recent-complete`는 `thinking/tool -> idle` 전환이 5분 이내일 때만 유지
-- `warm-idle`은 idle 전환 기준 `> 5분 && < 1시간`일 때 오른쪽 rail 후보
+- `recent-complete`는 `thinking/tool -> idle` 전환이 10분 이내일 때만 유지
+- `warm-idle`은 idle 전환 기준 `> 10분 && < 1시간`일 때 오른쪽 rail 후보
 - `cold-idle`은 idle 전환 기준 `>= 1시간`일 때 statusline에서 제외
 - permission은 age와 무관하게 유지
 - recent thinking / tool은 유지
@@ -312,7 +313,7 @@ function buildStatuslineAttentionRepresentatives(
 9. 기본값 제안
 
 기본 파라미터
-- `recentCompleteMaxAgeSec = 5 * 60`
+- `recentCompleteMaxAgeSec = 10 * 60`
 - `warmIdleMinAgeSec = 5 * 60 + 1`
 - `warmIdleMaxAgeSec = 60 * 60 - 1`
 - collapse 대상:
@@ -321,8 +322,8 @@ function buildStatuslineAttentionRepresentatives(
   - 현재 limit 유지
 
 왜 이 값인가
-- 5분 이내는 "방금 끝남"으로 받아들이기 쉽다.
-- 5분 초과~1시간 미만은 "다시 투입 가능한 idle"로 보기 적당하다.
+- 10분 이내는 "방금 끝남"으로 받아들이기 쉽다.
+- 10분 초과~1시간 미만은 "다시 투입 가능한 idle"로 보기 적당하다.
 - 1시간 이상은 statusline보다 popup/inventory에 두는 것이 맞다.
 
 10. 롤아웃 순서

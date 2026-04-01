@@ -1,0 +1,88 @@
+세션 개요
+
+- 이번 세션의 중심은 세 가지였다.
+  - statusline/summary popup/idle rail이 실제로 어떤 의미를 가져야 하는지 정리
+  - summary badge click 버그의 실제 원인 파악과 수정
+  - 다음 로드맵을 “기능 추가”보다 “의미와 계약 정리” 중심으로 재정렬
+- 현재 기준으로 popup, idle right rail, attention noise reduction은 이미 usable 수준까지 와 있다.
+- 이번 세션의 마지막 실제 버그는 `Cl/Cx/issue/thinking` summary 클릭이 tmux에서 `returned 1`로 실패하는 문제였다.
+
+명확해진 점
+
+- 지금 marmonitor의 핵심 문제는 더 이상 foreground statusline 성능이 아니다. 다음 우선순위는 상태 의미, 상호작용 계약, collector 설명 가능성이다.
+- `summary badge click`은 “popup 기능 자체”보다 “tmux popup 안에서 어떤 명령을 어떻게 다시 실행하느냐”가 더 중요했다.
+- `1~5` direct item click과 summary badge click은 같은 click UX처럼 보여도 실행 경로가 다르다.
+  - `1~5`는 현재 helper 프로세스에서 바로 jump
+  - summary badge는 tmux popup 안에서 CLI를 다시 실행
+- `matched / unmatched / stalled`는 개발자 용어라 그대로는 사용자에게 잘 전달되지 않는다.
+  - `matched` = 이 PID가 어느 세션인지 monitor가 설명 가능
+  - `unmatched` = AI 관련 프로세스는 찾았지만 어느 세션인지 식별 실패
+  - `stalled` = 세션 식별은 되었고 오래 멈춘 상태
+- `⚠`는 지금도 의미가 있지만, 실제로는 거의 `stalled + unmatched`의 합으로 이해해야 한다. `risk`는 아직 실데이터가 없다.
+
+잘 작동한 접근
+
+- 기능 계획을 바로 구현으로 밀기보다 문서로 먼저 쪼개고, 실제 구현 상태에 맞춰 문서를 다시 갱신하는 흐름이 효과적이었다.
+- statusline surface와 popup/jump surface를 분리해 생각한 것이 맞았다.
+  - statusline은 “지금 봐야 할 것”
+  - idle rail은 “지금 다시 투입 가능한 것”
+  - popup은 “범주를 풀어 보는 곳”
+- attention noise reduction을 raw 상태 변경이 아니라 statusline 전용 projection으로 본 접근이 맞았다.
+  - `recent-complete`
+  - `warm-idle`
+  - `cold-idle`
+  구간 모델이 이 역할 분리에 잘 맞는다.
+- summary click 버그를 좁힐 때, “기능은 같은데 왜 1~5만 되고 summary만 안 되지?”라는 실행 경로 차이를 중심으로 본 것이 결정적이었다.
+
+기대와 다르게 흘러간 지점에서 배운 점
+
+- 처음에는 `--collector-only` 제거가 핵심 원인처럼 보였지만, 그건 일부만 맞았다.
+- tmux client target 플래그도 처음엔 `-t`로 보고 수정했지만, tmux 3.6a 기준 `display-popup`과 `display-message`는 `-c target-client`가 맞았다.
+- 마지막 실제 원인은 popup 안에서 재실행하는 CLI 경로가 상대경로였던 점이었다.
+  - 이전: `node 'bin/marmonitor.js' popup ...`
+  - popup shell의 cwd가 repo 루트가 아니면 실패
+  - 수정 후: 절대경로 entrypoint 사용
+- 즉 이 버그는 popup 자체 버그보다 “tmux popup shell 문맥 + 재실행 entrypoint 계약” 버그였다.
+- summary click은 희소 경로라 launch 실패 시 `returned 1`로 표면화되는 것보다, 가능한 범위에서는 메시지로 흡수하는 편이 UX상 더 낫다.
+
+현재 구현 상태
+
+- summary badge click
+  - collector 우선, live fallback
+  - empty summary는 tmux 메시지로 처리
+  - popup launch 실패도 `returned 1` 대신 메시지 처리
+- tmux popup/message target
+  - `-c target-client` 사용
+- popup 재실행 entrypoint
+  - 절대경로 사용
+  - popup shell cwd와 무관하게 동작
+- attention / idle 관련 문서는 현재 구현 기준으로 다시 맞춰 둔 상태다.
+  - `docs/marmonitor-attention-noise-reduction-plan.txt`
+  - `docs/marmonitor-idle-right-rail-plan.txt`
+  - `docs/marmonitor-summary-popup-roadmap.txt`
+  - `docs/marmonitor-status-meaning-notes.txt`
+
+열린 질문
+
+- `risk`를 실제로 넣을지 여부는 아직 열려 있다.
+  - 지금 넣는다면 `near-stalled`처럼 매우 좁은 의미로만 가야 한다.
+- `unmatched`는 여전히 사용자 입장에서 직관적이지 않다.
+  - 노이즈를 줄이려면 transient-unmatched grace period를 둘지 검토할 가치가 있다.
+- `✅ activeCount` summary와 왼쪽 attention detail의 의미는 이제 꽤 달라졌다.
+  - 이 차이를 유지할지, 나중에 재정의할지 결정이 필요하다.
+- final verification 관점에서, 이번 마지막 popup 경로 수정 후에는 build와 targeted tests는 돌렸지만 전체 `npm test`는 마지막 단계 기준으로 다시 돌리지 않았다.
+
+다음 세션 재시작 가이드
+
+- 첫 확인 대상
+  1. 실제 tmux에서 summary badge click이 안정적으로 열리는지 재확인
+  2. 마지막 수정 기준으로 전체 `npm test`를 한 번 다시 돌릴지 결정
+  3. `README`/가이드 문서에 summary click과 popup 동작을 명시할지 판단
+- 다음 판단 우선순위
+  1. `⚠` 의미를 더 분명히 할지
+  2. `unmatched`를 transient/persistent로 나눠 noise를 줄일지
+  3. collector stale/degraded diagnostics를 먼저 넣을지
+- 보류 기준
+  - 지금은 새 surface를 더 추가하기보다 의미 정합성과 운영 설명 가능성을 먼저 다져야 한다.
+  - `risk`는 명확한 규칙 없이 넣지 않는다.
+  - popup/idle rail/attention을 더 화려하게 만드는 UI 작업은 우선순위가 낮다.

@@ -75,7 +75,7 @@ describe("summary popup item selection", () => {
       cwd: "/repo/claude-idle",
       status: "Idle",
       lastActivityAt: nowSec - 40,
-      idleSince: nowSec - 10 * 60,
+      idleSince: nowSec - 11 * 60,
     },
     {
       pid: 30,
@@ -91,6 +91,15 @@ describe("summary popup item selection", () => {
       cwd: "/repo/orphan",
       status: "Unmatched",
       runtimeSource: "cli",
+      startedAt: nowSec - 180,
+    },
+    {
+      pid: 41,
+      agentName: "Codex",
+      cwd: "/repo/transient",
+      status: "Unmatched",
+      runtimeSource: "cli",
+      startedAt: nowSec - 30,
     },
   ];
 
@@ -119,7 +128,7 @@ describe("summary popup item selection", () => {
     );
   });
 
-  it("selects stalled and unmatched sessions for issue filters", () => {
+  it("selects stalled and persistent unmatched sessions for issue filters", () => {
     assert.deepEqual(
       selectSummaryPopupItems(agents, "issue", { nowSec }).map((agent) => agent.pid),
       [11, 40],
@@ -131,7 +140,7 @@ describe("summary popup item selection", () => {
     assert.equal(selectSummaryPopupItem(agents, "phase:thinking", 2, { nowSec }), undefined);
   });
 
-  it("splits issue popup items into stalled and unmatched sections", () => {
+  it("splits issue popup items into stalled and persistent unmatched sections", () => {
     const sections = buildSummaryPopupSections(agents, "issue", { nowSec });
     assert.deepEqual(
       sections.map((section) => [section.key, section.items.map((agent) => agent.pid)]),
@@ -193,6 +202,11 @@ describe("summary popup render", () => {
     assert.match(text, /^Gemini Sessions \(0\)\n\nNo matching sessions\.$/);
   });
 
+  it("renders the issue empty-state message with review wording", () => {
+    const text = renderSummaryPopup([], "issue");
+    assert.match(text, /^Sessions Needing Review \(0\)\n\nNothing to review right now\.$/);
+  });
+
   it("renders the idle popup title", () => {
     assert.equal(summaryPopupTitle("idle", 2), "Idle Sessions (2)");
   });
@@ -237,14 +251,23 @@ describe("summary popup render", () => {
           agentName: "Claude Code",
           cwd: "/Users/jaewankim/Desktop/orphan",
           status: "Unmatched",
+          startedAt: Math.floor(Date.now() / 1000) - 180,
+        },
+        {
+          pid: 102,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/transient",
+          status: "Unmatched",
+          startedAt: Math.floor(Date.now() / 1000) - 30,
         },
       ],
       "issue",
     );
 
-    assert.match(text, /^Issue Sessions \(2\)/);
-    assert.match(text, /\n\nStalled \(1\)\n\n1\. ⚠ Codex stalled/);
-    assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.match(text, /^Sessions Needing Review \(2\)/);
+    assert.match(text, /\n\nInactive for a While \(1\)\n\n1\. ⚠ Codex stalled/);
+    assert.match(text, /\n\nUnresolved AI Processes \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.doesNotMatch(text, /transient/);
   });
 
   it("renders a paged popup header and page-local numbering", () => {
@@ -265,7 +288,7 @@ describe("summary popup render", () => {
     assert.match(text, /\nShowing 11-12 of 12\n/);
     assert.match(text, /\n\n1\. Codex repo-11/);
     assert.match(text, /\n\n2\. Codex repo-12/);
-    assert.match(text, /\n\nControls: 1-2 {2}Enter=1 {2}n\/p page {2}q close$/);
+    assert.match(text, /\n\n1-2 select {2}• {2}Enter open {2}• {2}n\/p page {2}• {2}q close$/);
   });
 
   it("renders issue page sections with local counts when a section is partially shown", () => {
@@ -283,6 +306,14 @@ describe("summary popup render", () => {
           agentName: "Claude Code",
           cwd: "/Users/jaewankim/Desktop/orphan",
           status: "Unmatched",
+          startedAt: Math.floor(Date.now() / 1000) - 180,
+        },
+        {
+          pid: 21,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/transient",
+          status: "Unmatched",
+          startedAt: Math.floor(Date.now() / 1000) - 30,
         },
       ],
       "issue",
@@ -290,10 +321,11 @@ describe("summary popup render", () => {
       10,
     );
 
-    assert.match(text, /^Issue Sessions \(12\) {2}\[Page 2\/2\]/);
+    assert.match(text, /^Sessions Needing Review \(12\) {2}\[Page 2\/2\]/);
     assert.match(text, /\nShowing 11-12 of 12\n/);
-    assert.match(text, /\n\nStalled \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
-    assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
-    assert.match(text, /\n\nControls: 1-2 {2}Enter=1 {2}n\/p page {2}q close$/);
+    assert.match(text, /\n\nInactive for a While \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
+    assert.match(text, /\n\nUnresolved AI Processes \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.match(text, /\n\n1-2 select {2}• {2}Enter open {2}• {2}n\/p page {2}• {2}q close$/);
+    assert.doesNotMatch(text, /transient/);
   });
 });

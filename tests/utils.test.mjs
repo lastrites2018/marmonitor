@@ -24,6 +24,7 @@ import {
   formatElapsedCompact,
   formatTokens,
   isIdleRightRailCandidate,
+  isPersistentUnmatched,
   joinLeftAndRightRail,
   resolvePhaseFromHistory,
   resolvePhaseWithDecay,
@@ -501,6 +502,23 @@ describe("selectUnmatchedTargets", () => {
   });
 });
 
+describe("isPersistentUnmatched", () => {
+  it("treats unmatched sessions older than 120 seconds as persistent", () => {
+    assert.equal(
+      isPersistentUnmatched({ status: "Unmatched", startedAt: 100 }, { nowSec: 220 }),
+      true,
+    );
+    assert.equal(
+      isPersistentUnmatched({ status: "Unmatched", startedAt: 100 }, { nowSec: 219 }),
+      false,
+    );
+  });
+
+  it("does not treat unknown-age unmatched sessions as persistent", () => {
+    assert.equal(isPersistentUnmatched({ status: "Unmatched" }, { nowSec: 500 }), false);
+  });
+});
+
 describe("buildStatuslineSummary", () => {
   it("builds compact summary with alert counts and metrics", () => {
     assert.equal(
@@ -576,7 +594,7 @@ describe("buildStatuslineSummary", () => {
         },
         "extended",
       ),
-      "AI 17 | wait 1 | risk 2 | stalled 4 | orphan 2 | active 6 | hot 1 | CPU 8% | MEM 36G",
+      "AI 17 | wait 1 | stalled 4 | orphan 2 | active 6 | hot 1 | CPU 8% | MEM 36G",
     );
   });
 
@@ -584,7 +602,7 @@ describe("buildStatuslineSummary", () => {
     const snapshot = {
       aliveCount: 19,
       waitingCount: 2,
-      riskCount: 0,
+      riskCount: 3,
       stalledCount: 1,
       unmatchedCount: 1,
       activeCount: 8,
@@ -695,7 +713,7 @@ describe("buildStatuslineSummary", () => {
     const { agents, alerts } = buildStatusPills({
       aliveCount: 16,
       waitingCount: 1,
-      riskCount: 0,
+      riskCount: 2,
       stalledCount: 2,
       unmatchedCount: 1,
       activeCount: 7,
@@ -1461,7 +1479,7 @@ describe("idle right rail", () => {
           agentName: "Claude Code",
           cwd: "/repo/a",
           status: "Idle",
-          idleSince: now - 10 * 60,
+          idleSince: now - 11 * 60,
         },
         { nowSec: now },
       ),
@@ -1500,7 +1518,7 @@ describe("idle right rail", () => {
           cwd: "/repo/d",
           status: "Idle",
           phase: "thinking",
-          idleSince: now - 10 * 60,
+          idleSince: now - 11 * 60,
         },
         { nowSec: now },
       ),
@@ -1557,7 +1575,7 @@ describe("idle right rail", () => {
           cwd: "/Users/macrent/work/marmonitor",
           status: "Idle",
           lastActivityAt: now - 30,
-          idleSince: now - 10 * 60,
+          idleSince: now - 11 * 60,
         },
         {
           pid: 31,
@@ -1565,7 +1583,7 @@ describe("idle right rail", () => {
           cwd: "/Users/macrent/side/marmonitor",
           status: "Idle",
           lastActivityAt: now - 10,
-          idleSince: now - 8 * 60,
+          idleSince: now - 12 * 60,
         },
         {
           pid: 32,
@@ -1573,7 +1591,7 @@ describe("idle right rail", () => {
           cwd: "/Users/macrent/work/roam-new",
           status: "Idle",
           lastActivityAt: now - 20,
-          idleSince: now - 9 * 60,
+          idleSince: now - 13 * 60,
         },
         {
           pid: 33,
@@ -1592,7 +1610,7 @@ describe("idle right rail", () => {
     assert.equal(snapshot.codexCount, 2);
     assert.deepEqual(
       snapshot.entries.map((entry) => entry.pid),
-      [31, 32, 30],
+      [30, 31, 32],
     );
     assert.match(snapshot.entries[0].label, /marmonitor/);
     assert.notEqual(snapshot.entries[0].label, snapshot.entries[2].label);
@@ -1724,13 +1742,23 @@ describe("buildStatuslineRealtimeView", () => {
           cpuPercent: 0,
           memoryMb: 100,
           lastActivityAt: now - 20,
-          idleSince: now - 10 * 60,
+          idleSince: now - 11 * 60,
         },
         {
           pid: 13,
           agentName: "Gemini",
           cwd: "/repo/d",
           status: "Unmatched",
+          startedAt: now - 30,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 14,
+          agentName: "Gemini",
+          cwd: "/repo/e",
+          status: "Unmatched",
+          startedAt: now - 180,
           cpuPercent: 0,
           memoryMb: 100,
         },

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildSummaryEmptyMessage,
   buildSummaryPopupTmuxArgs,
+  buildTmuxDisplayMessageArgs,
   extractPidFromStatusRange,
   findClickedAgent,
   parseStatusClickArgs,
@@ -118,11 +120,25 @@ describe("status click helper", () => {
 
     assert.equal(args[0], "display-popup");
     assert.equal(args.includes("-E"), true);
-    assert.deepEqual(args.slice(1, 6), ["-E", "-w", "70%", "-h", "70%"]);
+    assert.deepEqual(args.slice(1, 8), ["-E", "-w", "70%", "-h", "70%", "-c", "/dev/ttys040"]);
     assert.match(args.at(-1), /popup/);
     assert.match(args.at(-1), /--summary-target/);
     assert.match(args.at(-1), /--interactive/);
-    assert.match(args.at(-1), /--collector-only/);
+    assert.doesNotMatch(args.at(-1), /--collector-only/);
     assert.match(args.at(-1), /--target-client/);
+  });
+
+  it("builds a short message for empty summary targets", () => {
+    assert.equal(buildSummaryEmptyMessage("agent:codex"), "No Codex sessions.");
+    assert.equal(buildSummaryEmptyMessage("issue"), "No issue sessions.");
+  });
+
+  it("targets the clicked client when showing a tmux status message", () => {
+    assert.deepEqual(buildTmuxDisplayMessageArgs("No Codex sessions.", "/dev/ttys040"), [
+      "display-message",
+      "-c",
+      "/dev/ttys040",
+      "No Codex sessions.",
+    ]);
   });
 });

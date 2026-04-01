@@ -3,6 +3,8 @@ import { readHealthyCollectorSnapshotForRequest } from "./collector/client.js";
 import { resolveCliEntrypoint } from "./collector/entrypoints.js";
 import { loadConfig, resolveConfigPath } from "./config/index.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { selectSummaryPopupItems } from "./summary-popup/model.js";
+import { loadSummaryPopupAgents } from "./summary-popup/service.js";
 import { type SummaryPopupTarget, parseSummaryRange } from "./summary-popup/shared.js";
 import { jumpBackForClient, jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
@@ -94,6 +96,36 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+export function buildSummaryEmptyMessage(target: SummaryPopupTarget): string {
+  switch (target) {
+    case "agent:claude":
+      return "No Claude sessions.";
+    case "agent:codex":
+      return "No Codex sessions.";
+    case "agent:gemini":
+      return "No Gemini sessions.";
+    case "idle":
+      return "No idle sessions.";
+    case "phase:permission":
+      return "No approval-waiting sessions.";
+    case "phase:thinking":
+      return "No thinking sessions.";
+    case "phase:tool":
+      return "No tool sessions.";
+    case "issue":
+      return "No issue sessions.";
+  }
+}
+
+export function buildTmuxDisplayMessageArgs(message: string, targetClient?: string): string[] {
+  const args = ["display-message"];
+  if (targetClient) {
+    args.push("-c", targetClient);
+  }
+  args.push(message);
+  return args;
+}
+
 export function buildSummaryPopupTmuxArgs(
   target: SummaryPopupTarget,
   configPath?: string,
@@ -106,7 +138,6 @@ export function buildSummaryPopupTmuxArgs(
     "--summary-target",
     target,
     "--interactive",
-    "--collector-only",
     ...(configPath ? ["--config", configPath] : []),
     ...(targetClient ? ["--target-client", targetClient] : []),
   ]
@@ -114,6 +145,9 @@ export function buildSummaryPopupTmuxArgs(
     .join(" ");
 
   const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
+  if (targetClient) {
+    args.push("-c", targetClient);
+  }
   args.push(command);
   return args;
 }
@@ -135,6 +169,18 @@ function openSummaryPopup(
   }
 }
 
+function showTmuxDisplayMessage(message: string, targetClient?: string): void {
+  const args = buildTmuxDisplayMessageArgs(message, targetClient);
+  try {
+    execFileSync("tmux", args, {
+      stdio: "ignore",
+      env: process.env,
+    });
+  } catch {
+    // Ignore message delivery failures; no-op is acceptable for empty summaries.
+  }
+}
+
 export async function runStatusClick(args: string[] = process.argv.slice(2)): Promise<number> {
   const options = parseStatusClickArgs(args);
   if (!options.target) return 0;
@@ -152,9 +198,31 @@ export async function runStatusClick(args: string[] = process.argv.slice(2)): Pr
   }
 
   if (options.target.kind === "summary") {
-    return openSummaryPopup(options.target.target, options.configPath, options.targetClient)
-      ? 0
-      : 1;
+    try {
+      const requestedConfigPath = resolveConfigPath(options.configPath);
+      const config = await loadConfig(requestedConfigPath);
+      const loaded = await loadSummaryPopupAgents({
+        config,
+        requestedConfigPath,
+      });
+      if (loaded.agents) {
+        const items = selectSummaryPopupItems(loaded.agents, options.target.target);
+        if (items.length === 0) {
+          showTmuxDisplayMessage(
+            buildSummaryEmptyMessage(options.target.target),
+            options.targetClient,
+          );
+          return 0;
+        }
+      }
+    } catch {
+      // Fall through to popup launch; the popup command has its own fallback handling.
+    }
+    if (openSummaryPopup(options.target.target, options.configPath, options.targetClient)) {
+      return 0;
+    }
+    showTmuxDisplayMessage("Unable to open summary popup.", options.targetClient);
+    return 0;
   }
 
   const pid = options.target.pid;

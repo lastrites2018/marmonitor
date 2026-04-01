@@ -264,9 +264,10 @@ export interface AttentionBuildOptions {
 }
 
 const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
-const DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC = 5 * 60;
-const DEFAULT_WARM_IDLE_MIN_AGE_SEC = 5 * 60 + 1;
+const DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC = 10 * 60;
+const DEFAULT_WARM_IDLE_MIN_AGE_SEC = 10 * 60 + 1;
 const DEFAULT_WARM_IDLE_MAX_AGE_SEC = 60 * 60 - 1;
+const DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC = 2 * 60;
 
 export interface StatuslineAttentionOptions {
   nowSec?: number;
@@ -572,6 +573,33 @@ function attentionActivityTime(
   return agent.lastActivityAt ?? agent.lastResponseAt ?? agent.startedAt ?? 0;
 }
 
+function unmatchedReferenceTime(
+  agent: Pick<AgentSession, "startedAt" | "lastActivityAt" | "lastResponseAt">,
+): number | undefined {
+  return agent.startedAt ?? agent.lastActivityAt ?? agent.lastResponseAt;
+}
+
+function unmatchedAgeSec(
+  agent: Pick<AgentSession, "startedAt" | "lastActivityAt" | "lastResponseAt">,
+  nowSec: number,
+): number | undefined {
+  const at = unmatchedReferenceTime(agent);
+  if (!at) return undefined;
+  return Math.max(0, nowSec - at);
+}
+
+export function isPersistentUnmatched(
+  agent: Pick<AgentSession, "status" | "startedAt" | "lastActivityAt" | "lastResponseAt">,
+  options: { nowSec?: number; graceSec?: number } = {},
+): boolean {
+  if (agent.status !== "Unmatched") return false;
+  const nowSec = options.nowSec ?? Date.now() / 1000;
+  const graceSec = options.graceSec ?? DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC;
+  const age = unmatchedAgeSec(agent, nowSec);
+  if (age === undefined) return false;
+  return age >= graceSec;
+}
+
 function idleReferenceTime(
   agent: Pick<AgentSession, "idleSince" | "lastActivityAt" | "lastResponseAt" | "startedAt">,
 ): number | undefined {
@@ -651,13 +679,14 @@ export function buildStatuslineRealtimeView(
   agents: AgentSession[],
   options: StatuslineRealtimeViewOptions = {},
 ): StatuslineRealtimeView {
+  const nowSec = options.nowSec ?? Date.now() / 1000;
   const alive = agents.filter((agent) => agent.status !== "Dead" && agent.status !== "Unmatched");
   const snapshot: StatuslineSnapshot = {
     aliveCount: alive.length,
     waitingCount: alive.filter((agent) => agent.phase === "permission").length,
     riskCount: 0,
     stalledCount: alive.filter((agent) => agent.status === "Stalled").length,
-    unmatchedCount: agents.filter((agent) => agent.status === "Unmatched").length,
+    unmatchedCount: agents.filter((agent) => isPersistentUnmatched(agent, { nowSec })).length,
     activeCount: alive.filter((agent) => agent.status === "Active").length,
     highCpuCount: alive.filter((agent) => agent.cpuPercent >= 10).length,
     claudeCount: alive.filter((agent) => agent.agentName === "Claude Code").length,
@@ -680,7 +709,7 @@ export function buildStatuslineRealtimeView(
     attentionItems,
     jumpItems,
     idleSnapshot: options.includeIdleSnapshot
-      ? selectIdleSessionsForRightRail(agents, { nowSec: options.nowSec })
+      ? selectIdleSessionsForRightRail(agents, { nowSec })
       : undefined,
   };
 }
@@ -1075,6 +1104,7 @@ export function buildStatuslineAttentionFocusText(
 }
 
 export function buildTmuxBadgeSummary(snapshot: StatuslineSnapshot): string {
+  const issueCount = snapshot.stalledCount + snapshot.unmatchedCount;
   const agentBadges = [];
   if ((snapshot.claudeCount ?? 0) > 0) agentBadges.push(`Cl ${snapshot.claudeCount}`);
   if ((snapshot.codexCount ?? 0) > 0) agentBadges.push(`Cx ${snapshot.codexCount}`);
@@ -1083,10 +1113,8 @@ export function buildTmuxBadgeSummary(snapshot: StatuslineSnapshot): string {
 
   const attentionBadges = [];
   if (snapshot.waitingCount > 0) attentionBadges.push(`⏳ ${snapshot.waitingCount}`);
-  if (snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount > 0) {
-    attentionBadges.push(
-      `⚠ ${snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount}`,
-    );
+  if (issueCount > 0) {
+    attentionBadges.push(`⚠ ${issueCount}`);
   }
   if ((snapshot.thinkingCount ?? 0) > 0) attentionBadges.push(`🤔 ${snapshot.thinkingCount}`);
   if ((snapshot.toolCount ?? 0) > 0) attentionBadges.push(`🔧 ${snapshot.toolCount}`);
@@ -1102,6 +1130,7 @@ export function buildStatusPills(snapshot: StatuslineSnapshot): {
   agents: StatusPill[];
   alerts: StatusPill[];
 } {
+  const issueCount = snapshot.stalledCount + snapshot.unmatchedCount;
   const agents: StatusPill[] = [];
   if ((snapshot.claudeCount ?? 0) > 0) {
     agents.push({
@@ -1140,9 +1169,9 @@ export function buildStatusPills(snapshot: StatuslineSnapshot): {
       summaryTarget: "phase:permission",
     });
   }
-  if (snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount > 0) {
+  if (issueCount > 0) {
     alerts.push({
-      label: `⚠ ${snapshot.stalledCount + snapshot.unmatchedCount + snapshot.riskCount}`,
+      label: `⚠ ${issueCount}`,
       fg: "#11111b",
       bg: "#f9e2af",
       summaryTarget: "issue",
@@ -1187,10 +1216,6 @@ export function buildStatuslineSummary(
     compactParts.push(`!${snapshot.waitingCount}`);
     standardParts.push(`wait ${snapshot.waitingCount}`);
   }
-  if (snapshot.riskCount > 0) {
-    compactParts.push(`R${snapshot.riskCount}`);
-    standardParts.push(`risk ${snapshot.riskCount}`);
-  }
   if (snapshot.stalledCount > 0) {
     compactParts.push(`S${snapshot.stalledCount}`);
     standardParts.push(`stalled ${snapshot.stalledCount}`);
@@ -1205,12 +1230,7 @@ export function buildStatuslineSummary(
     if (snapshot.highCpuCount > 0) standardParts.push(`hot ${snapshot.highCpuCount}`);
   }
 
-  if (
-    snapshot.waitingCount === 0 &&
-    snapshot.riskCount === 0 &&
-    snapshot.stalledCount === 0 &&
-    snapshot.unmatchedCount === 0
-  ) {
+  if (snapshot.waitingCount === 0 && snapshot.stalledCount === 0 && snapshot.unmatchedCount === 0) {
     compactParts.push("ok");
     standardParts.push("ok");
   }

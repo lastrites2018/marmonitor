@@ -1,0 +1,162 @@
+matched / unmatched / stalled 의미 메모
+
+목적
+- `matched`, `unmatched`, `stalled`가 현재 marmonitor에서 정확히 무엇을 뜻하는지 사용자 관점과 구현 관점을 같이 정리한다.
+- 이후 `⚠` 의미 정리나 UX 문구 수정 시 기준 문서로 사용한다.
+
+핵심 요약
+- `matched`
+  - monitor가 이 프로세스를 실제 세션 기록과 연결했다는 뜻
+- `unmatched`
+  - AI 관련 프로세스는 찾았지만, 어느 세션인지 monitor가 식별하지 못했다는 뜻
+- `stalled`
+  - 세션 식별은 되었고, 오랫동안 반응이 없어서 멈춘 것으로 보는 상태
+
+1. matched
+
+의미
+- `matched`는 "정상"이나 "작업 중"을 뜻하지 않는다.
+- 단지 이 프로세스가 어느 세션인지 monitor가 설명할 수 있다는 뜻이다.
+
+monitor가 알게 되는 정보 예시
+- sessionId
+- cwd
+- startedAt
+- lastActivityAt / lastResponseAt
+- 세션 로그 또는 jsonl 파일 경로
+
+쉽게 말하면
+- "이 PID가 어느 AI 세션인지 안다"
+
+주의
+- matched여도 상태는 다양할 수 있다.
+  - `Active`
+  - `Idle`
+  - `Stalled`
+  - `thinking`
+  - `tool`
+
+2. unmatched
+
+의미
+- AI 프로세스처럼 보이는 PID는 찾았지만, 어느 세션 기록과 연결되는지 못 찾은 상태다.
+- 즉 작업 실패라기보다 "세션 식별 실패"에 가깝다.
+
+쉽게 말하면
+- "프로세스는 있는데 정체를 monitor가 못 붙였다"
+
+현재 코드 기준
+- `sessionMatched === false`면 `determineStatus()`가 바로 `Unmatched`를 반환한다.
+
+사용자 관점 해석
+- "AI 관련 프로세스는 떠 있는데, 이게 어느 세션인지 설명이 안 되는 상태"
+
+발생 가능한 경우
+1. 막 뜬 프로세스
+- 프로세스는 떴지만 세션 로그/jsonl이 아직 안 생겼거나 아직 못 찾은 경우
+
+2. orphan 프로세스
+- 프로세스는 남아 있는데 연결할 세션 파일이 이미 사라졌거나 정리된 경우
+
+3. 매칭 규칙이 못 푸는 경우
+- 같은 cwd에 세션이 여러 개 있거나
+- 시작 시각/세션 id로도 고르지 못한 경우
+
+4. 예외 실행 경로
+- wrapper/process tree가 다르거나
+- cwd가 `unknown`이거나
+- 표준 세션 경로 밖에서 실행된 경우
+
+실무적 해석
+- `Unmatched`는 "무조건 문제"는 아니다.
+- 다만 monitor 관점에서는 설명 불가 상태이므로 주의가 필요하다.
+
+3. stalled
+
+의미
+- 세션 식별은 되었고
+- 오랫동안 반응이 없고
+- CPU 사용도 거의 없어서
+- 사실상 멈춘 것으로 보는 상태다.
+
+현재 코드 기준
+- `sessionMatched === true`
+- CPU가 active threshold 이하
+- `elapsedSec > stalledAfterMin * 60`
+- `cpuPercent < 0.1`
+
+기본값
+- `activeCpuThreshold = 0.5`
+- `stalledAfterMin = 30`
+
+쉽게 말하면
+- "누군지는 아는데 오래 멈춘 세션"
+
+사용자 관점 해석
+- "내가 알던 세션인데, 지금 사실상 오래 멈춰 있다"
+
+4. Stalled vs Unmatched 차이
+
+Stalled
+- 세션 정체를 안다
+- 하지만 오래 멈췄다
+
+Unmatched
+- 프로세스는 보인다
+- 하지만 세션 정체를 모른다
+
+한 줄 비교
+- `Stalled` = known-but-stuck
+- `Unmatched` = found-but-unresolved
+
+5. 현재 `⚠`의 실제 의미
+
+현재 구현상 `⚠ n`은 사실상:
+- `Stalled`
+- `Unmatched`
+의 합이다.
+
+주의
+- `Risk` 섹션 구조는 있으나 현재 실데이터는 비어 있다.
+- 따라서 지금 `⚠ 10`은 거의 `stalled + unmatched = 10`으로 이해하면 된다.
+
+6. 합의한 다음 문서 기준
+
+다음 기준
+- `⚠ = stalled + persistent unmatched`
+- `transient unmatched`는 `⚠` count와 popup 기본 노출에서 제외
+- `Risk`는 내부 구조로 남길 수는 있지만 UI에서는 보이지 않게 둔다
+- 기본 grace period는 `120초`로 둔다
+
+의도
+- `⚠`를 "문제 또는 문제에 가까운 상태"로 더 좁고 설명 가능하게 만든다.
+- 막 뜬 프로세스 때문에 숫자가 흔들리는 현상을 줄인다.
+- 아직 정의가 약한 `Risk`를 억지로 노출하지 않는다.
+
+열린 설계 질문
+- `Unmatched`를 사용자-facing 문구에서 `정체 미확인 프로세스`로 병기할지
+- popup에서 `Stalled`와 `Persistent Unmatched`의 heading을 어떻게 표현할지
+
+7. 사용자-facing 설명 후보
+
+개발자 내부 용어
+- `Matched`
+- `Unmatched`
+- `Stalled`
+
+사용자 설명 용어
+- `Matched`
+  - "식별된 세션"
+- `Unmatched`
+  - "정체 미확인 프로세스"
+- `Stalled`
+  - "오래 멈춘 세션"
+
+추천
+- 내부 코드 용어는 유지
+- 문서/도움말/UX copy는 더 설명적인 표현을 병기하는 편이 낫다.
+
+메타 결론
+- `Unmatched`는 "고장"보다 "설명 실패"에 가깝다.
+- `Stalled`는 "설명 가능하지만 오래 멈춤"에 가깝다.
+- 따라서 `⚠`는 지금도 의미가 있지만, 앞으로는 `stalled + persistent unmatched` 중심으로 더 좁게 설명하는 편이 맞다.

@@ -11,7 +11,8 @@ statusline UX 이후 로드맵
 - 3. idle right rail MVP: 완료
 - 4. `⚠` 의미 복원: 부분 완료
   - `Stalled / Unmatched` 섹션 분리 완료
-  - `Risk`는 구조만 있고 실데이터는 없음
+  - 현재 구현에는 `Risk` placeholder가 남아 있음
+  - 이후 문서 기준은 `⚠ = stalled + persistent unmatched`, `transient unmatched` 제외, `Risk` UI 비노출
 - 5. attention UX 정제: 부분 완료
   - stale thinking/tool 강등 완료
   - active `•` 표식 제거 완료
@@ -69,13 +70,13 @@ statusline UX 이후 로드맵
 
 수용 기준
 - 왼쪽 상단 detail은 왜 이 항목이 보이는지 설명 가능해야 한다.
-- `recent-complete`는 5분까지만 왼쪽에 남아야 한다.
+- `recent-complete`는 10분까지만 왼쪽에 남아야 한다.
 - `warm-idle`은 오른쪽에만 남아야 한다.
 - `cold-idle`은 statusline에서 빠져야 한다.
 - 같은 repo의 반복 항목은 statusline에서 과도하게 중복되지 않아야 한다.
 - popup / jump의 정보 손실은 생기지 않아야 한다.
 
-2. `⚠` 의미 완성
+2. `⚠` 의미 정리
 
 상태
 - 다음 우선순위
@@ -83,15 +84,18 @@ statusline UX 이후 로드맵
 이미 된 것
 - popup 내부 `Stalled`
 - popup 내부 `Unmatched`
-- `Risk` 섹션 placeholder
+- `Risk` placeholder 구조
 
 남은 것
-- `Risk` 실데이터 모델링
+- `persistent unmatched` 기준 확정
+- `transient unmatched` grace period를 `120초`로 반영
+- `Risk`를 UI에서 숨기는 방향으로 정리
 - heading / empty-state 표현 정리
 
 수용 기준
-- `⚠ n`과 popup 총합 일치
-- 각 섹션의 의미가 사용자에게 바로 이해됨
+- `⚠ n = stalled + persistent unmatched`라고 바로 설명 가능
+- popup을 열었을 때 `오래 멈춘 세션`과 `정체 미확인 프로세스`를 구분해 이해 가능
+- 잠깐 뜨는 `unmatched` 때문에 `⚠` 숫자가 요동치지 않음
 
 3. collector 운영 가시화
 
@@ -179,7 +183,7 @@ statusline UX 이후 로드맵
 
 현재 추천 우선순위
 1. attention noise 축소
-2. `⚠`의 `Risk` 실데이터 판단
+2. `⚠` 의미 정리와 `persistent unmatched` 기준 확정
 3. collector 운영 가시화
 4. popup discoverability 문구 추가
 5. popup grouping / dedupe 재평가
@@ -189,7 +193,7 @@ statusline UX 이후 로드맵
 병렬 작업 기준
 - 다른 세션에서 바로 구현해도 되는 것
   - attention noise 축소
-  - `Risk` 실데이터 모델링
+  - `persistent unmatched` 기준 확정
   - discoverability 문구
 - 설계 더 보고 들어가는 게 좋은 것
   - popup grouping / dedupe
