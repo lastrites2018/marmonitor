@@ -15,7 +15,8 @@ import {
   writeCollectorStatusline,
 } from "../dist/collector/store.js";
 import { getDefaults } from "../dist/config/index.js";
-import { parseStatuslineClientArgs } from "../dist/statusline-client.js";
+import { appendJumpBackIndicator, parseStatuslineClientArgs } from "../dist/statusline-client.js";
+import { writeJumpAnchor } from "../dist/tmux/jump-anchor.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -38,7 +39,30 @@ describe("statusline client", () => {
       format: "extended",
       width: 120,
       configPath: "/tmp/settings.json",
+      clientTty: undefined,
     });
+  });
+
+  it("parses client tty for tmux-aware statusline requests", () => {
+    const parsed = parseStatuslineClientArgs([
+      "--statusline",
+      "--statusline-format",
+      "tmux-badges",
+      "--client-tty",
+      "/dev/ttys032",
+    ]);
+
+    assert.deepEqual(parsed, {
+      format: "tmux-badges",
+      width: undefined,
+      configPath: undefined,
+      clientTty: "/dev/ttys032",
+    });
+  });
+
+  it("appends a compact jump-back indicator only when an anchor exists", () => {
+    assert.equal(appendJumpBackIndicator("Cx 2", false), "Cx 2");
+    assert.equal(appendJumpBackIndicator("Cx 2", true), "Cx 2 ↩");
   });
 
   it("serves collector statusline via the main wrapper without full CLI bootstrap", async () => {
@@ -135,6 +159,68 @@ describe("statusline client", () => {
     );
 
     assert.equal(stdout.trim(), "AI12 | 8%");
+  });
+
+  it("adds a jump-back indicator when the current client has an anchor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-anchor-indicator-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 9876,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 8,
+      },
+      root,
+    );
+    await writeCollectorStatusline("tmux-badges", 8, undefined, "Cx 1", root);
+    await writeJumpAnchor(
+      {
+        clientId: "$3",
+        clientTty: "/dev/ttys032",
+        originSessionId: "$1",
+        originWindowId: "@41",
+        originPaneId: "%118",
+        recordedAt: now,
+        lastJumpedAt: now,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "tmux-badges",
+        "--config",
+        requestedConfigPath,
+        "--client-tty",
+        "/dev/ttys032",
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(stdout.trim(), "Cx 1 ↩");
   });
 
   it("materializes width-specific collector statuslines from the collector snapshot", async () => {

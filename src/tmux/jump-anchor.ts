@@ -43,6 +43,26 @@ export async function readJumpAnchor(
   }
 }
 
+export async function findJumpAnchorByClientTty(
+  clientTty: string,
+  root = tmpdir(),
+): Promise<TmuxJumpAnchor | undefined> {
+  const direct = await readJumpAnchor(clientTty, root);
+  if (direct) {
+    return direct;
+  }
+
+  const clientIds = await listJumpAnchorClientIds(root);
+  for (const clientId of clientIds) {
+    const anchor = await readJumpAnchor(clientId, root);
+    if (anchor?.clientTty === clientTty) {
+      return anchor;
+    }
+  }
+
+  return undefined;
+}
+
 export async function writeJumpAnchor(anchor: TmuxJumpAnchor, root = tmpdir()): Promise<void> {
   await mkdir(jumpAnchorDir(root), { recursive: true });
   await writeCacheFileAtomically(jumpAnchorFile(anchor.clientId, root), JSON.stringify(anchor));
