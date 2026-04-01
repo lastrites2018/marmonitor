@@ -53,6 +53,9 @@ describe("status click helper", () => {
   });
 
   it("parses summary click targets", () => {
+    assert.deepEqual(parseStatusClickTarget("back"), {
+      kind: "back",
+    });
     assert.deepEqual(parseStatusClickTarget("sum:claude"), {
       kind: "summary",
       target: "agent:claude",
@@ -85,6 +88,14 @@ describe("status click helper", () => {
     );
   });
 
+  it("parses jump-back click args alongside the clicked client tty", () => {
+    assert.deepEqual(parseStatusClickArgs(["back", "--client-tty", "/dev/ttys040"]), {
+      target: { kind: "back" },
+      configPath: undefined,
+      targetClient: "/dev/ttys040",
+    });
+  });
+
   it("finds the clicked agent by pid", () => {
     const sessions = [
       { pid: 10, cwd: "/repo/a", agentName: "Claude Code" },
@@ -94,7 +105,7 @@ describe("status click helper", () => {
     assert.equal(findClickedAgent(sessions, 30), undefined);
   });
 
-  it("opens summary popups without auto-closing on command exit", () => {
+  it("opens summary popups as interactive choosers tied to popup lifetime", () => {
     const args = buildSummaryPopupTmuxArgs(
       "phase:thinking",
       "/tmp/marmonitor.json",
@@ -102,10 +113,12 @@ describe("status click helper", () => {
     );
 
     assert.equal(args[0], "display-popup");
-    assert.equal(args.includes("-E"), false);
-    assert.deepEqual(args.slice(1, 6), ["-w", "70%", "-h", "70%", "-c"]);
-    assert.equal(args[6], "/dev/ttys040");
+    assert.equal(args.includes("-E"), true);
+    assert.deepEqual(args.slice(1, 7), ["-E", "-w", "70%", "-h", "70%", "-c"]);
+    assert.equal(args[7], "/dev/ttys040");
     assert.match(args.at(-1), /popup/);
     assert.match(args.at(-1), /--summary-target/);
+    assert.match(args.at(-1), /--interactive/);
+    assert.match(args.at(-1), /--target-client/);
   });
 });

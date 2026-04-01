@@ -4,7 +4,7 @@ import { resolveCliEntrypoint } from "./collector/entrypoints.js";
 import { loadConfig, resolveConfigPath } from "./config/index.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
 import { type SummaryPopupTarget, parseSummaryRange } from "./summary-popup/shared.js";
-import { jumpToAgentWithAnchor } from "./tmux/navigation.js";
+import { jumpBackForClient, jumpToAgentWithAnchor } from "./tmux/navigation.js";
 import type { AgentSession } from "./types.js";
 
 export function extractPidFromStatusRange(value: string | undefined): string | undefined {
@@ -14,10 +14,15 @@ export function extractPidFromStatusRange(value: string | undefined): string | u
 }
 
 export type StatusClickTarget =
+  | { kind: "back" }
   | { kind: "pid"; pid: number }
   | { kind: "summary"; target: SummaryPopupTarget };
 
 export function parseStatusClickTarget(value: string | undefined): StatusClickTarget | undefined {
+  if (value?.trim() === "back") {
+    return { kind: "back" };
+  }
+
   const pid = extractPidFromStatusRange(value);
   if (pid) {
     const parsed = Number.parseInt(pid, 10);
@@ -100,12 +105,14 @@ export function buildSummaryPopupTmuxArgs(
     "popup",
     "--summary-target",
     target,
+    "--interactive",
     ...(configPath ? ["--config", configPath] : []),
+    ...(targetClient ? ["--target-client", targetClient] : []),
   ]
     .map(shellQuote)
     .join(" ");
 
-  const args = ["display-popup", "-w", "70%", "-h", "70%"];
+  const args = ["display-popup", "-E", "-w", "70%", "-h", "70%"];
   if (targetClient) {
     args.push("-c", targetClient);
   }
@@ -133,6 +140,18 @@ function openSummaryPopup(
 export async function runStatusClick(args: string[] = process.argv.slice(2)): Promise<number> {
   const options = parseStatusClickArgs(args);
   if (!options.target) return 0;
+
+  if (options.target.kind === "back") {
+    const result = await jumpBackForClient({
+      targetClient: options.targetClient,
+      insideTmux: true,
+    });
+    if (result.executed) {
+      refreshTmuxClient(options.targetClient);
+      return 0;
+    }
+    return 1;
+  }
 
   if (options.target.kind === "summary") {
     return openSummaryPopup(options.target.target, options.configPath, options.targetClient)

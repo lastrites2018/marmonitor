@@ -37,6 +37,7 @@ import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { selectSummaryPopupItem, selectSummaryPopupItems } from "./summary-popup/model.js";
 import { renderSummaryPopup } from "./summary-popup/render.js";
 import { parseSummaryPopupTarget } from "./summary-popup/shared.js";
 import { captureTmuxPaneOutput, resolveTmuxJumpTarget } from "./tmux/index.js";
@@ -176,13 +177,20 @@ function clearScreen(): void {
   }
 }
 
-async function promptSelectionKey(maxChoice: number): Promise<number | undefined> {
+async function promptSelectionKey(
+  maxChoice: number,
+  options: {
+    allowDefaultSelection?: boolean;
+    prompt?: string;
+  } = {},
+): Promise<number | undefined> {
   if (!process.stdin.isTTY || maxChoice < 1) return undefined;
 
   const prompt =
-    maxChoice >= 10
+    options.prompt ??
+    (maxChoice >= 10
       ? "\nPress 1-9 to jump, 0 for item 10, q to cancel: "
-      : `\nPress 1-${maxChoice} to jump, q to cancel: `;
+      : `\nPress 1-${maxChoice} to jump, q to cancel: `);
   process.stdout.write(prompt);
 
   return await new Promise<number | undefined>((resolve) => {
@@ -205,6 +213,11 @@ async function promptSelectionKey(maxChoice: number): Promise<number | undefined
       if (input === "\u001b" || input === "q" || input === "Q") {
         cleanup();
         resolve(undefined);
+        return;
+      }
+      if (options.allowDefaultSelection && (input === "\r" || input === "\n" || input === "\r\n")) {
+        cleanup();
+        resolve(1);
         return;
       }
 
@@ -883,6 +896,8 @@ program
     "Summary target, e.g. agent:claude or phase:thinking",
   )
   .option("--config <path>", "Path to settings.json")
+  .option("--interactive", "Choose and jump from inside the popup")
+  .option("--target-client <tty>", "tmux client tty to jump within")
   .action(async (opts) => {
     const target = parseSummaryPopupTarget(opts.summaryTarget);
     if (!target) {
@@ -903,7 +918,45 @@ program
         useSharedRuntimeSnapshots: true,
       }));
 
+    if (!opts.interactive) {
+      console.log(renderSummaryPopup(agents, target));
+      return;
+    }
+
+    const items = selectSummaryPopupItems(agents, target);
     console.log(renderSummaryPopup(agents, target));
+    if (items.length === 0) {
+      return;
+    }
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      console.error("--interactive requires an interactive terminal.");
+      process.exit(1);
+    }
+
+    const maxSelectable = Math.min(items.length, 10);
+    const selection = await promptSelectionKey(maxSelectable, {
+      allowDefaultSelection: true,
+      prompt:
+        maxSelectable >= 10
+          ? "\nPress 1-9 to jump, 0 for item 10, Enter for item 1, q to close: "
+          : `\nPress 1-${maxSelectable} to jump, Enter for item 1, q to close: `,
+    });
+    if (!selection) {
+      return;
+    }
+
+    const agent = selectSummaryPopupItem(agents, target, selection);
+    if (!agent) {
+      process.exit(1);
+    }
+
+    const result = await jumpToAgentWithAnchor(agent, {
+      targetClient: opts.targetClient,
+      insideTmux: true,
+    });
+    if (!result.executed) {
+      process.exit(1);
+    }
   });
 
 program

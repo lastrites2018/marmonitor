@@ -3,12 +3,12 @@ import type { AgentSession } from "../types.js";
 import { buildSummaryPopupSelections, summaryPopupTitle } from "./model.js";
 import type { SummaryPopupTarget } from "./shared.js";
 
-function popupPhaseIcon(agent: AgentSession): string {
+function popupPhaseIcon(agent: AgentSession): string | undefined {
   if (agent.phase === "permission") return "⏳";
   if (agent.phase === "thinking") return "🤔";
   if (agent.phase === "tool") return "🔧";
   if (agent.status === "Stalled" || agent.status === "Unmatched") return "⚠";
-  return "•";
+  return undefined;
 }
 
 function popupAgentName(agentName: string): string {
@@ -25,7 +25,8 @@ function popupElapsed(
 function popupLine(index: number, agent: AgentSession, label: string): string {
   const icon = popupPhaseIcon(agent);
   const elapsed = popupElapsed(agent);
-  const headline = `${index}. ${icon} ${popupAgentName(agent.agentName)} ${label}${elapsed ? ` ${elapsed}` : ""}`;
+  const iconPrefix = icon ? `${icon} ` : "";
+  const headline = `${index}. ${iconPrefix}${popupAgentName(agent.agentName)} ${label}${elapsed ? ` ${elapsed}` : ""}`;
   const detail = `   PID: ${agent.pid}  ${shortenPath(agent.cwd)}`;
   return `${headline}\n${detail}`;
 }

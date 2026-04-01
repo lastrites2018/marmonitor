@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { selectSummaryPopupItems, summaryPopupTitle } from "../dist/summary-popup/model.js";
+import {
+  selectSummaryPopupItem,
+  selectSummaryPopupItems,
+  summaryPopupTitle,
+} from "../dist/summary-popup/model.js";
 import { renderSummaryPopup } from "../dist/summary-popup/render.js";
 import {
   parseSummaryPopupTarget,
@@ -102,6 +106,11 @@ describe("summary popup item selection", () => {
       [11, 40],
     );
   });
+
+  it("selects a popup item by 1-based index", () => {
+    assert.equal(selectSummaryPopupItem(agents, "phase:thinking", 1, { nowSec })?.pid, 20);
+    assert.equal(selectSummaryPopupItem(agents, "phase:thinking", 2, { nowSec }), undefined);
+  });
 });
 
 describe("summary popup render", () => {
@@ -152,7 +161,7 @@ describe("summary popup render", () => {
       "agent:codex",
     );
 
-    assert.match(text, /1\. • Codex alpha\/marmonitor/);
-    assert.match(text, /2\. • Codex beta\/marmonitor/);
+    assert.match(text, /1\. Codex alpha\/marmonitor/);
+    assert.match(text, /2\. Codex beta\/marmonitor/);
   });
 });

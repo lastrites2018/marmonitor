@@ -62,7 +62,17 @@ describe("statusline client", () => {
 
   it("appends a compact jump-back indicator only when an anchor exists", () => {
     assert.equal(appendJumpBackIndicator("Cx 2", false), "Cx 2");
-    assert.equal(appendJumpBackIndicator("Cx 2", true), "Cx 2 ↩");
+    assert.equal(appendJumpBackIndicator("Cx 2", true), "Cx 2  #[range=user|back]↩#[norange]");
+  });
+
+  it("inserts the jump-back indicator between tmux summary and detail items", () => {
+    assert.equal(
+      appendJumpBackIndicator(
+        "Cl 1 Cx 8  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]  #[range=user|pid:20]2 Cx app 1m#[norange]",
+        true,
+      ),
+      "Cl 1 Cx 8  #[range=user|back]↩#[norange]  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]  #[range=user|pid:20]2 Cx app 1m#[norange]",
+    );
   });
 
   it("serves collector statusline via the main wrapper without full CLI bootstrap", async () => {
@@ -220,7 +230,7 @@ describe("statusline client", () => {
       },
     );
 
-    assert.equal(stdout.trim(), "Cx 1 ↩");
+    assert.equal(stdout.trim(), "Cx 1  #[range=user|back]↩#[norange]");
   });
 
   it("materializes width-specific collector statuslines from the collector snapshot", async () => {

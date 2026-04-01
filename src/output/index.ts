@@ -278,7 +278,7 @@ function attentionKindLabel(kind: ReturnType<typeof buildAttentionItems>[number]
     case "tool":
       return "🔧 Tool";
     case "active":
-      return "• Recent";
+      return "Recent";
   }
 }
 
@@ -323,7 +323,7 @@ function jumpAttentionPhaseIcon(item: ReturnType<typeof buildJumpAttentionItems>
   if (item.kind === "permission") return " ⏳";
   if (item.kind === "thinking") return " 🤔";
   if (item.kind === "tool") return " 🔧";
-  return " •";
+  return "";
 }
 
 function jumpAttentionLine(item: ReturnType<typeof buildJumpAttentionItems>[number]): string {

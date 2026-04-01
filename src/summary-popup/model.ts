@@ -54,6 +54,16 @@ export function selectSummaryPopupItems(
   return buildSummaryPopupSelections(agents, options).itemsByTarget[target];
 }
 
+export function selectSummaryPopupItem(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  selection: number,
+  options: AttentionBuildOptions = {},
+): AgentSession | undefined {
+  if (!Number.isInteger(selection) || selection < 1) return undefined;
+  return selectSummaryPopupItems(agents, target, options)[selection - 1];
+}
+
 export function buildSummaryPopupSelections(
   agents: AgentSession[],
   options: AttentionBuildOptions = {},

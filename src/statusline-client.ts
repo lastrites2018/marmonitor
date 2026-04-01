@@ -18,9 +18,18 @@ export type StatuslineClientOptions = {
   clientTty?: string;
 };
 
+const TMUX_DETAIL_MARKER = "  #[range=user|pid:";
+const TMUX_BACK_RANGE = "#[range=user|back]↩#[norange]";
+
 export function appendJumpBackIndicator(output: string, hasAnchor: boolean): string {
   if (!hasAnchor) return output;
-  return `${output} ↩`;
+  const detailIndex = output.indexOf(TMUX_DETAIL_MARKER);
+  if (detailIndex === -1) {
+    return `${output}  ${TMUX_BACK_RANGE}`;
+  }
+  const summary = output.slice(0, detailIndex);
+  const detail = output.slice(detailIndex);
+  return `${summary}  ${TMUX_BACK_RANGE}${detail}`;
 }
 
 export function parseStatuslineClientArgs(args: string[]): StatuslineClientOptions {

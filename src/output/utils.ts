@@ -652,7 +652,7 @@ export function buildAttentionFocusText(
     } else if (item.kind === "tool") {
       segments.push(time ? `🔧${agent} ${path} ${time}` : `🔧${agent} ${path}`);
     } else if (item.kind === "active") {
-      segments.push(time ? `•${agent} ${path} ${time}` : `•${agent} ${path}`);
+      segments.push(time ? `${agent} ${path} ${time}` : `${agent} ${path}`);
     }
   }
 
@@ -933,8 +933,8 @@ export function buildTmuxAttentionPills(
               : `🔧${agent} ${path}`
             : item.kind === "active"
               ? time
-                ? `•${agent} ${path} ${time}`
-                : `•${agent} ${path}`
+                ? `${agent} ${path} ${time}`
+                : `${agent} ${path}`
               : time
                 ? `⚠${agent} ${path} ${time}`
                 : `⚠${agent} ${path}`;

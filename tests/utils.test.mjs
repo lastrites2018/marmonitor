@@ -947,7 +947,7 @@ describe("buildAttentionItems", () => {
       },
     ]);
 
-    assert.equal(text, "🤔Cl thinking 10s │ 🔧Cx tool 5s │ •Cl active 8s");
+    assert.equal(text, "🤔Cl thinking 10s │ 🔧Cx tool 5s │ Cl active 8s");
   });
 
   it("builds condensed focus text from top attention items", () => {
@@ -1153,7 +1153,7 @@ describe("buildAttentionItems", () => {
 
     assert.match(text, /#\[range=user\|pid:30]1 ⏳Cl mjjo allow#\[norange]/);
     assert.match(text, /#\[range=user\|pid:50]2 🤔Cl kbank 26s#\[norange]/);
-    assert.match(text, /#\[range=user\|pid:60]3 •Cx vos-data-service 10s#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:60]3 Cx vos-data-service 10s#\[norange]/);
     assert.doesNotMatch(text, /#\[fg=/);
     assert.doesNotMatch(text, /#\[bold,fg=/);
   });
@@ -1274,6 +1274,6 @@ describe("buildAttentionItems", () => {
 
     assert.match(text, /⏳Cl mjjo allow/);
     assert.doesNotMatch(text, /🤔Cl/);
-    assert.doesNotMatch(text, /•Cx/);
+    assert.doesNotMatch(text, /\b•Cx\b/);
   });
 });
