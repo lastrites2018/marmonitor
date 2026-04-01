@@ -201,7 +201,7 @@ describe("renderStatusline idle right rail", () => {
       },
     );
 
-    assert.match(text, /#\[range=user\|pid:35]5 Cl recent-complete 20s#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:35]5 ✅Cl recent-complete 20s#\[norange]/);
     assert.doesNotMatch(text, /#\[range=user\|pid:34]5 🔧Cx tool-b 16s#\[norange]/);
   });
 });

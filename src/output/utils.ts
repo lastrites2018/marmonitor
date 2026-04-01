@@ -299,6 +299,7 @@ export interface StatuslineAttentionRepresentative {
   collapsedCount: number;
   status: AgentSession["status"];
   phase: AgentSession["phase"];
+  recentComplete: boolean;
 }
 
 export interface StatuslineRealtimeView {
@@ -974,6 +975,7 @@ function collapseStatuslineAttentionDuplicates(
         collapsedCount: sorted.length - 1,
         status: representative.status,
         phase: representative.phase,
+        recentComplete: true,
       } satisfies StatuslineAttentionRepresentative;
     })
     .sort((a, b) => {
@@ -1011,6 +1013,7 @@ export function buildStatuslineAttentionRepresentatives(
     collapsedCount: 0,
     status: item.status,
     phase: item.phase,
+    recentComplete: false,
   }));
 
   const recentComplete = collapseStatuslineAttentionDuplicates(
@@ -1074,7 +1077,10 @@ export function buildAttentionFocusText(
     } else if (item.kind === "tool") {
       segments.push(time ? `🔧${agent} ${path} ${time}` : `🔧${agent} ${path}`);
     } else if (item.kind === "active") {
-      segments.push(time ? `${agent} ${path} ${time}` : `${agent} ${path}`);
+      const donePrefix = item.phase === "done" ? "✓" : "";
+      segments.push(
+        time ? `${donePrefix}${agent} ${path} ${time}` : `${donePrefix}${agent} ${path}`,
+      );
     }
   }
 
@@ -1090,22 +1096,31 @@ export function buildStatuslineAttentionFocusText(
   const detailItems = buildStatuslineAttentionRepresentatives(items, maxCount, width, options);
   if (detailItems.length === 0) return undefined;
 
-  const segments = detailItems.map((item) => {
-    const agent = agentShortName(item.agentName);
-    const time = formatElapsedCompact(item.lastAt);
-    if (item.kind === "permission") {
-      return `⏳${agent} ${item.label} allow`;
-    }
-    if (item.kind === "thinking") {
-      return time ? `🤔${agent} ${item.label} ${time}` : `🤔${agent} ${item.label}`;
-    }
-    if (item.kind === "tool") {
-      return time ? `🔧${agent} ${item.label} ${time}` : `🔧${agent} ${item.label}`;
-    }
-    return time ? `${agent} ${item.label} ${time}` : `${agent} ${item.label}`;
-  });
+  const segments = detailItems.map((item) => formatStatuslineRepresentativeLabel(item));
 
   return segments.length > 0 ? segments.join(" │ ") : undefined;
+}
+
+function formatStatuslineRepresentativeLabel(item: StatuslineAttentionRepresentative): string {
+  const agent = agentShortName(item.agentName);
+  const time = formatElapsedCompact(item.lastAt);
+
+  if (item.kind === "permission") {
+    return `⏳${agent} ${item.label} allow`;
+  }
+  if (item.kind === "thinking") {
+    return time ? `🤔${agent} ${item.label} ${time}` : `🤔${agent} ${item.label}`;
+  }
+  if (item.kind === "tool") {
+    return time ? `🔧${agent} ${item.label} ${time}` : `🔧${agent} ${item.label}`;
+  }
+  if (item.recentComplete) {
+    return time ? `✅${agent} ${item.label} ${time}` : `✅${agent} ${item.label}`;
+  }
+  if (item.phase === "done") {
+    return time ? `✓${agent} ${item.label} ${time}` : `✓${agent} ${item.label}`;
+  }
+  return time ? `${agent} ${item.label} ${time}` : `${agent} ${item.label}`;
 }
 
 export function buildTmuxBadgeSummary(snapshot: StatuslineSnapshot): string {
@@ -1360,6 +1375,7 @@ export function buildTmuxAttentionPills(
     const agent = agentShortName(item.agentName);
     const path = pathLabels[index];
     const time = formatElapsedCompact(item.lastActivityAt ?? item.lastResponseAt);
+    const donePrefix = item.kind === "active" && item.phase === "done" ? "✓" : "";
     const label =
       item.kind === "permission"
         ? `⏳${agent} ${path} allow`
@@ -1373,8 +1389,8 @@ export function buildTmuxAttentionPills(
               : `🔧${agent} ${path}`
             : item.kind === "active"
               ? time
-                ? `${agent} ${path} ${time}`
-                : `${agent} ${path}`
+                ? `${donePrefix}${agent} ${path} ${time}`
+                : `${donePrefix}${agent} ${path}`
               : time
                 ? `⚠${agent} ${path} ${time}`
                 : `⚠${agent} ${path}`;
@@ -1407,22 +1423,7 @@ export function buildTmuxStatuslineAttentionPills(
   }
 
   const segments = jumpItems.map((item, index) => {
-    const agent = agentShortName(item.agentName);
-    const time = formatElapsedCompact(item.lastAt);
-    const label =
-      item.kind === "permission"
-        ? `⏳${agent} ${item.label} allow`
-        : item.kind === "thinking"
-          ? time
-            ? `🤔${agent} ${item.label} ${time}`
-            : `🤔${agent} ${item.label}`
-          : item.kind === "tool"
-            ? time
-              ? `🔧${agent} ${item.label} ${time}`
-              : `🔧${agent} ${item.label}`
-            : time
-              ? `${agent} ${item.label} ${time}`
-              : `${agent} ${item.label}`;
+    const label = formatStatuslineRepresentativeLabel(item);
     const content =
       style === "pill"
         ? tmuxAttentionSegment(index + 1, item.kind, label)

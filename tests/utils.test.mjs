@@ -1543,11 +1543,119 @@ describe("statusline attention projection", () => {
 
     assert.equal(
       buildStatuslineAttentionFocusText(items, 5, 200, { nowSec: now }),
-      "⏳Cl marmonitor allow │ Cx roam-new +1 20s",
+      "⏳Cl marmonitor allow │ ✅Cx roam-new +1 20s",
     );
     assert.match(
       buildTmuxStatuslineAttentionPills(items, 5, 200, "plain", { nowSec: now }) ?? "",
-      /#\[range=user\|pid:30]1 ⏳Cl marmonitor allow#\[norange] {2}#\[range=user\|pid:31]2 Cx roam-new \+1 20s#\[norange]/,
+      /#\[range=user\|pid:30]1 ⏳Cl marmonitor allow#\[norange] {2}#\[range=user\|pid:31]2 ✅Cx roam-new \+1 20s#\[norange]/,
+    );
+  });
+
+  it("renders done and recent-complete with different non-thinking icons", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "active",
+          priority: 2,
+          pid: 50,
+          agentName: "Claude Code",
+          cwd: "/repo/done-only",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 40,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 51,
+          agentName: "Codex",
+          cwd: "/repo/recent-complete",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.pid, item.recentComplete]),
+      [[51, true]],
+    );
+    assert.equal(
+      buildStatuslineAttentionFocusText(
+        [
+          {
+            kind: "active",
+            priority: 2,
+            pid: 50,
+            agentName: "Claude Code",
+            cwd: "/repo/done-only",
+            status: "Idle",
+            phase: "done",
+            lastActivityAt: now - 40,
+          },
+          {
+            kind: "active",
+            priority: 2,
+            pid: 51,
+            agentName: "Codex",
+            cwd: "/repo/recent-complete",
+            status: "Idle",
+            phase: "done",
+            lastActivityAt: now - 20,
+            recentCompleteAt: now - 20,
+          },
+        ],
+        5,
+        200,
+        { nowSec: now },
+      ),
+      "✅Cx recent-complete 20s",
+    );
+    assert.equal(
+      buildAttentionFocusText(
+        [
+          {
+            kind: "active",
+            priority: 2,
+            pid: 50,
+            agentName: "Claude Code",
+            cwd: "/repo/done-only",
+            status: "Idle",
+            phase: "done",
+            lastActivityAt: now - 40,
+          },
+        ],
+        5,
+        200,
+      ),
+      "✓Cl done-only 40s",
+    );
+    assert.match(
+      buildTmuxAttentionPills(
+        [
+          {
+            kind: "active",
+            priority: 2,
+            pid: 50,
+            agentName: "Claude Code",
+            cwd: "/repo/done-only",
+            status: "Idle",
+            phase: "done",
+            lastActivityAt: now - 40,
+          },
+        ],
+        5,
+        200,
+        "plain",
+        { ordered: true },
+      ) ?? "",
+      /#\[range=user\|pid:50]1 ✓Cl done-only 40s#\[norange]/,
     );
   });
 });
