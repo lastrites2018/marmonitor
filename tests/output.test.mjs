@@ -71,7 +71,7 @@ describe("renderStatusline idle right rail", () => {
     });
     assert.match(
       text,
-      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor#\[norange] · #\[range=user\|pid:11]roam-new#\[norange]$/,
+      /#\[range=user\|sum:idle]idle Cl1 Cx1#\[norange] \| #\[range=user\|pid:10]marmonitor 10m#\[norange] · #\[range=user\|pid:11]roam-new 20m#\[norange]$/,
     );
   });
 

@@ -1599,22 +1599,23 @@ describe("idle right rail", () => {
   });
 
   it("chooses full, compact, minimal, or hidden idle rail variants by width budget", () => {
+    const now = Math.floor(Date.now() / 1000);
     const snapshot = {
       total: 5,
       claudeCount: 2,
       codexCount: 3,
       entries: [
-        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: 100 },
-        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: 99 },
-        { pid: 3, agent: "codex", cwd: "/repo/c", label: "fmbattle", lastAt: 98 },
-        { pid: 4, agent: "claude", cwd: "/repo/d", label: "ghostty", lastAt: 97 },
-        { pid: 5, agent: "codex", cwd: "/repo/e", label: "vos-proto", lastAt: 96 },
+        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: now - 60 },
+        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: now - 120 },
+        { pid: 3, agent: "codex", cwd: "/repo/c", label: "fmbattle", lastAt: now - 180 },
+        { pid: 4, agent: "claude", cwd: "/repo/d", label: "ghostty", lastAt: now - 240 },
+        { pid: 5, agent: "codex", cwd: "/repo/e", label: "vos-proto", lastAt: now - 300 },
       ],
     };
 
     assert.equal(
       buildIdleRightRail(snapshot, 220, 200),
-      "idle Cl2 Cx3 | marmonitor · roam-new · fmbattle · ghostty · vos-proto",
+      "idle Cl2 Cx3 | marmonitor 1m · roam-new 2m · fmbattle 3m · ghostty 4m · vos-proto 5m",
     );
     assert.equal(buildIdleRightRail(snapshot, 130, 20), "idle Cl2 Cx3");
     assert.equal(buildIdleRightRail(snapshot, 130, 7), "idle 5");
@@ -1623,19 +1624,20 @@ describe("idle right rail", () => {
   });
 
   it("separates idle popup ranges from direct idle session jumps in tmux rail", () => {
+    const now = Math.floor(Date.now() / 1000);
     const snapshot = {
       total: 2,
       claudeCount: 1,
       codexCount: 1,
       entries: [
-        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: 100 },
-        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: 99 },
+        { pid: 1, agent: "claude", cwd: "/repo/a", label: "marmonitor", lastAt: now - 60 },
+        { pid: 2, agent: "codex", cwd: "/repo/b", label: "roam-new", lastAt: now - 120 },
       ],
     };
 
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 220, 200),
-      "#[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:1]marmonitor#[norange] · #[range=user|pid:2]roam-new#[norange]",
+      "#[range=user|sum:idle]idle Cl1 Cx1#[norange] | #[range=user|pid:1]marmonitor 1m#[norange] · #[range=user|pid:2]roam-new 2m#[norange]",
     );
     assert.equal(
       buildTmuxIdleRightRail(snapshot, 130, 20),

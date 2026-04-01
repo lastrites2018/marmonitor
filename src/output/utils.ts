@@ -697,6 +697,11 @@ type IdleRightRailVariant =
   | { kind: "compact"; countLabel: string }
   | { kind: "minimal" };
 
+function formatIdleRightRailEntry(entry: IdleRightRailEntry): string {
+  const time = formatElapsedCompact(entry.lastAt);
+  return time ? `${entry.label} ${time}` : entry.label;
+}
+
 function resolveIdleRightRailVariant(
   snapshot: IdleRightRailSnapshot,
   width: number | undefined,
@@ -712,7 +717,7 @@ function resolveIdleRightRailVariant(
   const names = snapshot.entries.slice(0, nameLimit);
   const fullPlain =
     names.length > 0
-      ? `idle ${countLabel} | ${names.map((entry) => entry.label).join(" · ")}`
+      ? `idle ${countLabel} | ${names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`
       : `idle ${countLabel}`;
   const compactPlain = `idle ${countLabel}`;
   const minimalPlain = `idle ${snapshot.total}`;
@@ -742,7 +747,7 @@ export function buildIdleRightRail(
   if (variant.kind === "compact") {
     return `idle ${variant.countLabel}`;
   }
-  return `idle ${variant.countLabel} | ${variant.names.map((entry) => entry.label).join(" · ")}`;
+  return `idle ${variant.countLabel} | ${variant.names.map((entry) => formatIdleRightRailEntry(entry)).join(" · ")}`;
 }
 
 export function makeTmuxSummaryRange(target: SummaryPopupTarget, content: string): string {
@@ -765,7 +770,7 @@ export function buildTmuxIdleRightRail(
 
   const summary = makeTmuxSummaryRange("idle", `idle ${variant.countLabel}`);
   const names = variant.names
-    .map((entry) => tmuxUserRange(`pid:${entry.pid}`, entry.label))
+    .map((entry) => tmuxUserRange(`pid:${entry.pid}`, formatIdleRightRailEntry(entry)))
     .join(" · ");
   return names ? `${summary} | ${names}` : summary;
 }
