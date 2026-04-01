@@ -37,8 +37,12 @@ import { parseGeminiSession } from "./scanner/gemini.js";
 import { scanAgents } from "./scanner/index.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
-import { selectSummaryPopupItem, selectSummaryPopupItems } from "./summary-popup/model.js";
-import { renderSummaryPopup } from "./summary-popup/render.js";
+import {
+  buildSummaryPopupPage,
+  selectSummaryPopupItem,
+  selectSummaryPopupItems,
+} from "./summary-popup/model.js";
+import { renderSummaryPopup, renderSummaryPopupPage } from "./summary-popup/render.js";
 import { loadSummaryPopupAgents } from "./summary-popup/service.js";
 import { parseSummaryPopupTarget } from "./summary-popup/shared.js";
 import { captureTmuxPaneOutput, resolveTmuxJumpTarget } from "./tmux/index.js";
@@ -234,6 +238,82 @@ async function promptSelectionKey(
       if (trimmed === "0" && maxChoice >= 10) {
         cleanup();
         resolve(10);
+      }
+    };
+
+    if (restoreRawMode) setStdinRawMode(true);
+    stdin.resume();
+    stdin.on("data", onData);
+  });
+}
+
+type SummaryPopupAction =
+  | { kind: "close" }
+  | { kind: "next-page" }
+  | { kind: "prev-page" }
+  | { kind: "select"; selection: number };
+
+async function promptSummaryPopupAction(maxChoice: number): Promise<SummaryPopupAction> {
+  if (!process.stdin.isTTY || maxChoice < 1) {
+    return { kind: "close" };
+  }
+
+  const prompt =
+    maxChoice >= 10
+      ? "\n1-9 jump, 0=item10, Enter=item1, n/p page, q close: "
+      : `\n1-${maxChoice} jump, Enter=item1, n/p page, q close: `;
+  process.stdout.write(prompt);
+
+  return await new Promise<SummaryPopupAction>((resolve) => {
+    const stdin = process.stdin;
+    const restoreRawMode = "setRawMode" in stdin && typeof stdin.setRawMode === "function";
+
+    const cleanup = (): void => {
+      if (restoreRawMode) setStdinRawMode(false);
+      stdin.pause();
+      stdin.removeListener("data", onData);
+      process.stdout.write("\n");
+    };
+
+    const onData = (chunk: Buffer): void => {
+      const input = chunk.toString("utf8");
+      if (input === "\u0003") {
+        cleanup();
+        exitWithCleanup(130);
+      }
+      if (input === "\u001b" || input === "q" || input === "Q") {
+        cleanup();
+        resolve({ kind: "close" });
+        return;
+      }
+      if (input === "n" || input === "N" || input === "\u001b[C") {
+        cleanup();
+        resolve({ kind: "next-page" });
+        return;
+      }
+      if (input === "p" || input === "P" || input === "\u001b[D") {
+        cleanup();
+        resolve({ kind: "prev-page" });
+        return;
+      }
+      if (input === "\r" || input === "\n" || input === "\r\n") {
+        cleanup();
+        resolve({ kind: "select", selection: 1 });
+        return;
+      }
+
+      const trimmed = input.trim();
+      if (/^[1-9]$/.test(trimmed)) {
+        const selection = Number.parseInt(trimmed, 10);
+        if (selection <= maxChoice) {
+          cleanup();
+          resolve({ kind: "select", selection });
+        }
+        return;
+      }
+      if (trimmed === "0" && maxChoice >= 10) {
+        cleanup();
+        resolve({ kind: "select", selection: 10 });
       }
     };
 
@@ -935,29 +1015,43 @@ program
       process.exit(1);
     }
 
-    const maxSelectable = Math.min(items.length, 10);
-    const selection = await promptSelectionKey(maxSelectable, {
-      allowDefaultSelection: true,
-      prompt:
-        maxSelectable >= 10
-          ? "\nPress 1-9 to jump, 0 for item 10, Enter for item 1, q to close: "
-          : `\nPress 1-${maxSelectable} to jump, Enter for item 1, q to close: `,
-    });
-    if (!selection) {
+    let page = 1;
+    while (true) {
+      clearScreen();
+      const popupPage = buildSummaryPopupPage(agents, target, page, { pageSize: 10 });
+      console.log(renderSummaryPopupPage(agents, target, page, 10));
+      const maxSelectable = popupPage.items.length;
+      if (maxSelectable === 0) {
+        return;
+      }
+
+      const action = await promptSummaryPopupAction(maxSelectable);
+      if (action.kind === "close") {
+        return;
+      }
+      if (action.kind === "next-page") {
+        page = Math.min(page + 1, popupPage.totalPages);
+        continue;
+      }
+      if (action.kind === "prev-page") {
+        page = Math.max(page - 1, 1);
+        continue;
+      }
+
+      const globalSelection = popupPage.startIndex + action.selection;
+      const agent = selectSummaryPopupItem(agents, target, globalSelection);
+      if (!agent) {
+        process.exit(1);
+      }
+
+      const result = await jumpToAgentWithAnchor(agent, {
+        targetClient: opts.targetClient,
+        insideTmux: true,
+      });
+      if (!result.executed) {
+        process.exit(1);
+      }
       return;
-    }
-
-    const agent = selectSummaryPopupItem(agents, target, selection);
-    if (!agent) {
-      process.exit(1);
-    }
-
-    const result = await jumpToAgentWithAnchor(agent, {
-      targetClient: opts.targetClient,
-      insideTmux: true,
-    });
-    if (!result.executed) {
-      process.exit(1);
     }
   });
 

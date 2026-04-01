@@ -17,6 +17,25 @@ export interface SummaryPopupSection {
   items: AgentSession[];
 }
 
+export interface SummaryPopupPageSection {
+  key: SummaryPopupSection["key"];
+  title: string;
+  totalCount: number;
+  items: AgentSession[];
+}
+
+export interface SummaryPopupPage {
+  target: SummaryPopupTarget;
+  title: string;
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  startIndex: number;
+  items: AgentSession[];
+  sections: SummaryPopupPageSection[];
+}
+
 function isAlive(agent: AgentSession): boolean {
   return agent.status !== "Dead" && agent.status !== "Unmatched";
 }
@@ -168,4 +187,47 @@ export function buildSummaryPopupSections(
     },
     { key: "risk" as const, title: `Risk (${risk.length})`, items: risk },
   ].filter((section) => section.items.length > 0);
+}
+
+export function buildSummaryPopupPage(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  page: number,
+  options: AttentionBuildOptions & { pageSize?: number } = {},
+): SummaryPopupPage {
+  const pageSize =
+    Number.isInteger(options.pageSize) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 10;
+  const sections = buildSummaryPopupSections(agents, target, options);
+  const allItems = sections.flatMap((section) => section.items);
+  const totalItems = allItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const pageItems = allItems.slice(startIndex, endIndex);
+  const pagePidSet = new Set(pageItems.map((agent) => agent.pid));
+  const pageSections = sections
+    .map((section) => {
+      const sectionItems = section.items.filter((agent) => pagePidSet.has(agent.pid));
+      if (sectionItems.length === 0) return undefined;
+      return {
+        key: section.key,
+        title: section.title,
+        totalCount: section.items.length,
+        items: sectionItems,
+      } satisfies SummaryPopupPageSection;
+    })
+    .filter((section): section is SummaryPopupPageSection => section !== undefined);
+
+  return {
+    target,
+    title: summaryPopupTitle(target, totalItems),
+    page: currentPage,
+    pageSize,
+    totalItems,
+    totalPages,
+    startIndex,
+    items: pageItems,
+    sections: pageSections,
+  };
 }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildSummaryPopupPage,
   buildSummaryPopupSections,
   selectSummaryPopupItem,
   selectSummaryPopupItems,
   summaryPopupTitle,
 } from "../dist/summary-popup/model.js";
-import { renderSummaryPopup } from "../dist/summary-popup/render.js";
+import { renderSummaryPopup, renderSummaryPopupPage } from "../dist/summary-popup/render.js";
 import {
   parseSummaryPopupTarget,
   parseSummaryRange,
@@ -123,6 +124,29 @@ describe("summary popup item selection", () => {
       ],
     );
   });
+
+  it("builds paged popup selections in 10-item chunks", () => {
+    const page = buildSummaryPopupPage(
+      Array.from({ length: 12 }, (_, index) => ({
+        pid: index + 1,
+        agentName: "Codex",
+        cwd: `/repo/${index + 1}`,
+        status: "Active",
+        lastActivityAt: nowSec - index,
+      })),
+      "agent:codex",
+      2,
+      { pageSize: 10, nowSec },
+    );
+
+    assert.equal(page.page, 2);
+    assert.equal(page.totalPages, 2);
+    assert.equal(page.startIndex, 10);
+    assert.deepEqual(
+      page.items.map((agent) => agent.pid),
+      [11, 12],
+    );
+  });
 });
 
 describe("summary popup render", () => {
@@ -199,6 +223,52 @@ describe("summary popup render", () => {
 
     assert.match(text, /^Issue Sessions \(2\)/);
     assert.match(text, /\n\nStalled \(1\)\n\n1\. ⚠ Codex stalled/);
+    assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
+  });
+
+  it("renders a paged popup header and page-local numbering", () => {
+    const text = renderSummaryPopupPage(
+      Array.from({ length: 12 }, (_, index) => ({
+        pid: index + 1,
+        agentName: "Codex",
+        cwd: `/Users/jaewankim/Desktop/repo-${index + 1}`,
+        status: "Active",
+        lastActivityAt: Math.floor(Date.now() / 1000) - index,
+      })),
+      "agent:codex",
+      2,
+      10,
+    );
+
+    assert.match(text, /^Codex Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /\n\n1\. Codex repo-11/);
+    assert.match(text, /\n\n2\. Codex repo-12/);
+  });
+
+  it("renders issue page sections with local counts when a section is partially shown", () => {
+    const text = renderSummaryPopupPage(
+      [
+        ...Array.from({ length: 11 }, (_, index) => ({
+          pid: index + 1,
+          agentName: "Codex",
+          cwd: `/Users/jaewankim/Desktop/stalled-${index + 1}`,
+          status: "Stalled",
+          lastActivityAt: Math.floor(Date.now() / 1000) - index,
+        })),
+        {
+          pid: 20,
+          agentName: "Claude Code",
+          cwd: "/Users/jaewankim/Desktop/orphan",
+          status: "Unmatched",
+        },
+      ],
+      "issue",
+      2,
+      10,
+    );
+
+    assert.match(text, /^Issue Sessions \(12\)  \[Page 2\/2\]/);
+    assert.match(text, /\n\nStalled \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
     assert.match(text, /\n\nUnmatched \(1\)\n\n2\. ⚠ Claude orphan/);
   });
 });
