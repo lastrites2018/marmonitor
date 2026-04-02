@@ -201,7 +201,7 @@ describe("summary popup item selection", () => {
 describe("summary popup render", () => {
   it("derives popup size from the tmux client bounds", () => {
     assert.deepEqual(resolveSummaryPopupSize(80, 20), { width: 60, height: 14 });
-    assert.deepEqual(resolveSummaryPopupSize(240, 60), { width: 140, height: 28 });
+    assert.deepEqual(resolveSummaryPopupSize(240, 60), { width: 140, height: 40 });
   });
 
   it("reduces popup page size on shorter terminals", () => {

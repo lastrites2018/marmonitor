@@ -37,7 +37,7 @@ export function resolveSummaryPopupSize(
   const height = boundedSize(
     Math.floor(clientHeight * 0.7),
     14,
-    28,
+    40,
     Math.max(10, clientHeight - 2),
   );
 
