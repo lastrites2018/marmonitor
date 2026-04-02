@@ -10,7 +10,7 @@ import {
   setCodexIndexCache,
 } from "../dist/scanner/cache.js";
 import { parseClaudeSession } from "../dist/scanner/claude.js";
-import { indexCodexSessions } from "../dist/scanner/codex.js";
+import { assignCodexSessionsToProcesses, indexCodexSessions } from "../dist/scanner/codex.js";
 import { resolveGeminiProjectDir } from "../dist/scanner/gemini.js";
 import {
   buildReusableLightSeed,
@@ -208,6 +208,41 @@ describe("resolveGeminiProjectDir", () => {
     const resolved = await resolveGeminiProjectDir("/repo/gemini-target", { tmpRoot });
 
     assert.equal(resolved, targetDir);
+  });
+});
+
+describe("assignCodexSessionsToProcesses", () => {
+  it("keeps concurrent same-cwd Codex processes mapped to distinct sessions by start time", () => {
+    const assignments = assignCodexSessionsToProcesses(
+      [
+        { pid: 67794, cwd: "/repo", startedAt: 1_000 },
+        { pid: 78817, cwd: "/repo", startedAt: 10_000 },
+      ],
+      new Map([
+        [
+          "/repo",
+          [
+            {
+              id: "older",
+              filePath: "/repo/older.jsonl",
+              cwd: "/repo",
+              timestamp: 900,
+              lastActivityAt: 1_200,
+            },
+            {
+              id: "current",
+              filePath: "/repo/current.jsonl",
+              cwd: "/repo",
+              timestamp: 9_800,
+              lastActivityAt: 20_000,
+            },
+          ],
+        ],
+      ]),
+    );
+
+    assert.equal(assignments.get(67794)?.id, "older");
+    assert.equal(assignments.get(78817)?.id, "current");
   });
 });
 

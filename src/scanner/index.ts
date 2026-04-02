@@ -30,7 +30,7 @@ import {
   parseClaudeSession,
   parseClaudeTokens,
 } from "./claude.js";
-import { detectCodexPhase, indexCodexSessions } from "./codex.js";
+import { assignCodexSessionsToProcesses, detectCodexPhase, indexCodexSessions } from "./codex.js";
 import type { CodexSessionMeta } from "./codex.js";
 import { parseGeminiSession } from "./gemini.js";
 import { groupByParent } from "./group.js";
@@ -126,6 +126,7 @@ export async function scanAgents(
   const codexProcesses = agentProcesses.filter((a) => a.agentName === "Codex");
   let codexSessions: CodexSessionMeta[] = [];
   let codexSessionsByCwd: Map<string, CodexSessionMeta[]> | undefined;
+  let codexAssignedSessionsByPid: Map<number, CodexSessionMeta> | undefined;
   if (codexProcesses.length > 0) {
     codexSessions = await profileAsync("scanAgents", "codex_index", () =>
       indexCodexSessions(config, { includeTokenUsage, runtimePaths }),
@@ -139,6 +140,19 @@ export async function scanAgents(
         codexSessionsByCwd.set(session.cwd, [session]);
       }
     }
+    const codexProcessCandidates = await Promise.all(
+      codexProcesses.map(async ({ proc }) => ({
+        pid: proc.pid,
+        cwd: (await getProcessCwd(proc.pid)) ?? "unknown",
+        startedAt: await getProcessStartTime(proc.pid, {
+          sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
+        }),
+      })),
+    );
+    codexAssignedSessionsByPid = assignCodexSessionsToProcesses(
+      codexProcessCandidates.filter((candidate) => candidate.cwd !== "unknown"),
+      codexSessionsByCwd,
+    );
   }
 
   // 4. Build sessions with enrichment (parallel)
@@ -252,7 +266,10 @@ export async function scanAgents(
         "unknown";
       const cwdMatches = codexSessionsByCwd?.get(cwd) ?? [];
       let matched: CodexSessionMeta | undefined;
-      if (seededSession?.sessionId && cwdMatches.length <= 1) {
+      if (codexAssignedSessionsByPid?.has(proc.pid)) {
+        matched = codexAssignedSessionsByPid.get(proc.pid);
+      }
+      if (!matched && seededSession?.sessionId && cwdMatches.length <= 1) {
         matched = cwdMatches.find((session) => session.id === seededSession.sessionId);
       }
       if (!matched && cwdMatches.length === 1) {

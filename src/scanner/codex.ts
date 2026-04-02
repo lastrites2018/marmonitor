@@ -46,6 +46,12 @@ interface CodexPhaseCacheOptions {
   statFile?: typeof stat;
 }
 
+export interface CodexProcessCandidate {
+  pid: number;
+  cwd: string;
+  startedAt?: number;
+}
+
 export function getCodexSessionRoots(
   config?: MarmonitorConfig,
   runtimePaths?: RuntimeDataPaths,
@@ -388,4 +394,55 @@ export function matchCodexSession(
   sessions: CodexSessionMeta[],
 ): CodexSessionMeta | undefined {
   return selectCodexSession(processCwd, processStartTime, sessions);
+}
+
+export function assignCodexSessionsToProcesses(
+  processes: CodexProcessCandidate[],
+  sessionsByCwd: Map<string, CodexSessionMeta[]>,
+): Map<number, CodexSessionMeta> {
+  const assignments = new Map<number, CodexSessionMeta>();
+  const processesByCwd = new Map<string, CodexProcessCandidate[]>();
+  for (const process of processes) {
+    const existing = processesByCwd.get(process.cwd) ?? [];
+    existing.push(process);
+    processesByCwd.set(process.cwd, existing);
+  }
+
+  for (const [cwd, cwdProcesses] of processesByCwd) {
+    const cwdSessions = sessionsByCwd.get(cwd) ?? [];
+    if (cwdProcesses.length <= 1 || cwdSessions.length <= 1) continue;
+
+    const remainingSessions = [...cwdSessions].sort((a, b) => a.timestamp - b.timestamp);
+    const sortedProcesses = [...cwdProcesses].sort((a, b) => {
+      const aStarted = a.startedAt ?? Number.POSITIVE_INFINITY;
+      const bStarted = b.startedAt ?? Number.POSITIVE_INFINITY;
+      if (aStarted !== bStarted) return aStarted - bStarted;
+      return a.pid - b.pid;
+    });
+
+    for (const process of sortedProcesses) {
+      if (remainingSessions.length === 0) break;
+      if (process.startedAt === undefined) continue;
+
+      let bestIndex = 0;
+      let bestGap = Math.abs(remainingSessions[0].timestamp - process.startedAt);
+      for (let index = 1; index < remainingSessions.length; index++) {
+        const gap = Math.abs(remainingSessions[index].timestamp - process.startedAt);
+        if (gap < bestGap) {
+          bestGap = gap;
+          bestIndex = index;
+        }
+      }
+      assignments.set(process.pid, remainingSessions.splice(bestIndex, 1)[0]);
+    }
+
+    for (const process of sortedProcesses) {
+      if (assignments.has(process.pid)) continue;
+      const nextSession = remainingSessions.pop();
+      if (!nextSession) break;
+      assignments.set(process.pid, nextSession);
+    }
+  }
+
+  return assignments;
 }
