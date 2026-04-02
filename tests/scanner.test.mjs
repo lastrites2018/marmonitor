@@ -13,6 +13,7 @@ import { parseClaudeSession } from "../dist/scanner/claude.js";
 import { indexCodexSessions } from "../dist/scanner/codex.js";
 import { resolveGeminiProjectDir } from "../dist/scanner/gemini.js";
 import {
+  buildReusableLightSeed,
   buildSeedSessionIndex,
   detectAgentFromProcessSignature,
   parseGeminiSessionContent,
@@ -440,6 +441,48 @@ describe("buildSeedSessionIndex", () => {
 
     assert.equal(index?.get("Claude Code:101")?.cwd, "/repo/override");
     assert.equal(index?.get("Codex:101")?.cwd, "/repo/two");
+  });
+});
+
+describe("buildReusableLightSeed", () => {
+  it("keeps only stable session metadata for light-mode reuse", () => {
+    const seed = buildReusableLightSeed({
+      cwd: "/repo/app",
+      sessionId: "session-1",
+      startedAt: 1_000,
+      tokenUsage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheCreationTokens: 3,
+        cacheReadTokens: 4,
+        totalTokens: 5,
+      },
+      model: "gpt-5.4",
+      sessionMatched: true,
+      runtimeSource: "cli",
+      phase: "thinking",
+      lastActivityAt: 2_000,
+      lastResponseAt: 1_900,
+      idleSince: 1_800,
+      recentCompleteAt: 1_700,
+      unmatchedReason: "session_file_missing",
+    });
+
+    assert.deepEqual(seed, {
+      cwd: "/repo/app",
+      sessionId: "session-1",
+      startedAt: 1_000,
+      tokenUsage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheCreationTokens: 3,
+        cacheReadTokens: 4,
+        totalTokens: 5,
+      },
+      model: "gpt-5.4",
+      sessionMatched: true,
+      runtimeSource: "cli",
+    });
   });
 });
 

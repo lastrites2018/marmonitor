@@ -61,6 +61,21 @@ export function buildSeedSessionIndex(
   return new Map(seedSessions.map((session) => [`${session.agentName}:${session.pid}`, session]));
 }
 
+export function buildReusableLightSeed(
+  cachedEnrichment: Partial<AgentSession> | undefined,
+): Partial<AgentSession> | undefined {
+  if (!cachedEnrichment) return undefined;
+  return {
+    cwd: cachedEnrichment.cwd,
+    sessionId: cachedEnrichment.sessionId,
+    startedAt: cachedEnrichment.startedAt,
+    tokenUsage: cachedEnrichment.tokenUsage,
+    model: cachedEnrichment.model,
+    sessionMatched: cachedEnrichment.sessionMatched,
+    runtimeSource: cachedEnrichment.runtimeSource,
+  };
+}
+
 /** Scan for all running AI agent sessions */
 export async function scanAgents(
   config: MarmonitorConfig,
@@ -144,8 +159,6 @@ export async function scanAgents(
     let phase: SessionPhase;
     let lastResponseAt: number | undefined;
     let lastActivityAt: number | undefined;
-    let idleSince: number | undefined;
-    let recentCompleteAt: number | undefined;
     let unmatchedReason: UnmatchedReason | undefined;
     let codexSessionFile: string | undefined;
     let sessionLookupAttempted = false;
@@ -153,41 +166,38 @@ export async function scanAgents(
     const runtimeSource = detectRuntimeSource(agentName, proc.cmd);
     const cacheKey = `${agentName}:${proc.pid}`;
     const cachedEnrichment = sessionEnrichmentCache.get(cacheKey);
+    const reusableLightSeed = !isFullEnrichment
+      ? buildReusableLightSeed(cachedEnrichment)
+      : undefined;
     const seededSession = seededSessions?.get(cacheKey);
     const seededTransitionSession = seededTransitionSessions?.get(cacheKey) ?? seededSession;
 
-    if (!isFullEnrichment && cachedEnrichment) {
-      if (cachedEnrichment.cwd) cwd = cachedEnrichment.cwd;
-      sessionId = cachedEnrichment.sessionId;
-      startedAt = cachedEnrichment.startedAt;
-      tokenUsage = cachedEnrichment.tokenUsage;
-      model = cachedEnrichment.model;
-      sessionMatched = cachedEnrichment.sessionMatched ?? false;
-      phase = cachedEnrichment.phase;
-      lastResponseAt = cachedEnrichment.lastResponseAt;
-      lastActivityAt = cachedEnrichment.lastActivityAt;
-      idleSince = cachedEnrichment.idleSince;
-      recentCompleteAt = cachedEnrichment.recentCompleteAt;
-      unmatchedReason = cachedEnrichment.unmatchedReason;
-    } else if (agentName === "Claude Code") {
+    if (agentName === "Claude Code") {
       let processCwd =
-        seededSession?.cwd && seededSession.cwd !== "unknown" ? seededSession.cwd : undefined;
-      let processStartTime = seededSession?.startedAt;
+        seededSession?.cwd && seededSession.cwd !== "unknown"
+          ? seededSession.cwd
+          : reusableLightSeed?.cwd && reusableLightSeed.cwd !== "unknown"
+            ? reusableLightSeed.cwd
+            : undefined;
+      let processStartTime = seededSession?.startedAt ?? reusableLightSeed?.startedAt;
       let claudeData: Partial<AgentSession> = {};
+      const lightSeedSessionId = seededSession?.sessionId ?? reusableLightSeed?.sessionId;
+      const lightSeedSessionMatched =
+        seededSession?.sessionMatched ?? reusableLightSeed?.sessionMatched;
       if (
-        seededSession?.sessionMatched &&
-        seededSession.sessionId &&
+        lightSeedSessionMatched &&
+        lightSeedSessionId &&
         processCwd &&
         processStartTime !== undefined
       ) {
         claudeData = {
           cwd: processCwd,
-          sessionId: seededSession.sessionId,
+          sessionId: lightSeedSessionId,
           startedAt: processStartTime,
-          tokenUsage: seededSession.tokenUsage,
-          model: seededSession.model,
+          tokenUsage: seededSession?.tokenUsage ?? reusableLightSeed?.tokenUsage,
+          model: seededSession?.model ?? reusableLightSeed?.model,
           sessionMatched: true,
-          lastActivityAt: seededSession.lastActivityAt,
+          lastActivityAt: seededSession?.lastActivityAt,
         };
       } else {
         claudeData = await parseClaudeSession(proc.pid, config, {
@@ -236,7 +246,10 @@ export async function scanAgents(
       }
     } else if (agentName === "Codex") {
       cwd =
-        cachedEnrichment?.cwd ?? seededSession?.cwd ?? (await getProcessCwd(proc.pid)) ?? "unknown";
+        reusableLightSeed?.cwd ??
+        seededSession?.cwd ??
+        (await getProcessCwd(proc.pid)) ??
+        "unknown";
       const cwdMatches = codexSessionsByCwd?.get(cwd) ?? [];
       let matched: CodexSessionMeta | undefined;
       if (seededSession?.sessionId && cwdMatches.length <= 1) {
@@ -281,7 +294,10 @@ export async function scanAgents(
       }
     } else if (agentName === "Gemini") {
       cwd =
-        cachedEnrichment?.cwd ?? seededSession?.cwd ?? (await getProcessCwd(proc.pid)) ?? "unknown";
+        reusableLightSeed?.cwd ??
+        seededSession?.cwd ??
+        (await getProcessCwd(proc.pid)) ??
+        "unknown";
       const geminiData = await parseGeminiSession(cwd, {
         includeTokenUsage,
       });
@@ -289,6 +305,7 @@ export async function scanAgents(
       startedAt =
         geminiData.startedAt ??
         seededSession?.startedAt ??
+        reusableLightSeed?.startedAt ??
         (await getProcessStartTime(proc.pid, {
           sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
         }));
@@ -306,7 +323,10 @@ export async function scanAgents(
 
     if (cwd === "unknown") {
       cwd =
-        cachedEnrichment?.cwd ?? seededSession?.cwd ?? (await getProcessCwd(proc.pid)) ?? "unknown";
+        reusableLightSeed?.cwd ??
+        seededSession?.cwd ??
+        (await getProcessCwd(proc.pid)) ??
+        "unknown";
     }
 
     const statusBaseAt = lastActivityAt ?? lastResponseAt ?? startedAt;
@@ -330,8 +350,8 @@ export async function scanAgents(
       },
       seededTransitionSession,
     );
-    idleSince = transitionState.idleSince;
-    recentCompleteAt = transitionState.recentCompleteAt;
+    const idleSince = transitionState.idleSince;
+    const recentCompleteAt = transitionState.recentCompleteAt;
 
     const session = {
       agentName,
