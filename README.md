@@ -18,11 +18,10 @@
 
 ---
 
-> **Fork note**
+> **Implementation note**
 >
-> This repository is a personal fork and customization of the original `marmonitor` work by MJ JO. The core ideas of tmux-native AI session monitoring, attention-first statusline design, and zero-instrumentation process/session enrichment come from the original project and its author. This fork mainly layers personal workflow changes on top of that foundation. In other words, this is a personal variant, not the canonical upstream.
->
-> The README below describes the current behavior of this fork. Some tmux interactions documented here go beyond the stock upstream plugin defaults and reflect a personal local setup built on top of the original project's binaries and ideas.
+> This document describes the current implementation behavior in this repository.
+> The core ideas come from the original `marmonitor` project by MJ JO; this repository keeps behavior consistent with its local implementation.
 
 
 ## Why marmonitor?
@@ -47,7 +46,7 @@ Running multiple AI coding agents in tmux is now the norm — Claude Code refact
 
 **tmux statusline** — always visible at the bottom of your terminal:
 - Agent counts (`Cl 12`, `Cx 2`, `Gm 1`) — how many sessions are running
-- Summary badges (`⏳ 1`, `⚠ 2`, `🤔 2`, `🔧 1`) — click a badge to open a filtered popup chooser; `⚠` opens `Sessions Needing Review`, split into `Inactive for a While` and `Unresolved AI Processes`
+- Summary badges (`⏳ 1`, `⚠ 2`, `🤔 2`, `🔧 1`) — click a badge to open a filtered popup chooser; `⚠` opens `Sessions Needing Review`, split into `⚠ Stalled` and `⚠ Persistent Unmatched`
 - Numbered attention items (`1 ⏳Cl my-project allow`, `2 🤔Cx api-server 6m`) — click to jump directly to that tmux pane
 - Right-aligned idle rail (`idle Cl2 Cx3 | marmonitor · roam-new`) — shows Claude/Codex sessions that are open, reusable, and warm-idle; the idle summary is also clickable
 
@@ -58,7 +57,7 @@ Running multiple AI coding agents in tmux is now the norm — Claude Code refact
 
 **Quick jump** — click a numbered attention item or press `Option+1` to jump directly to the top attention session's tmux pane. No searching through windows.
 
-**Low-latency statusline path** — this fork uses a thin statusline client (`marmonitor-statusline`) and collector-backed artifacts so the foreground tmux refresh path stays lightweight during multi-session use.
+**Low-latency statusline path** — this implementation uses a thin statusline client (`marmonitor-statusline`) and collector-backed artifacts so the foreground tmux refresh path stays lightweight during multi-session use.
 
 **Full status** — `marmonitor status` shows everything:
 
@@ -68,13 +67,13 @@ Running multiple AI coding agents in tmux is now the norm — Claude Code refact
   <em>All sessions with status, tokens, phase, CPU/MEM, and worker process tree</em>
 </p>
 
-**Zero instrumentation** — no API keys, no agent plugins, no code changes. marmonitor reads local process info and session files from the outside. This fork is source-first: the exact low-latency tmux flow described here assumes this fork's code plus the collector and the dedicated statusline/click helper binaries. `npm install -g marmonitor` installs the upstream baseline package, not this fork.
+**Zero instrumentation** — no API keys, no agent plugins, no code changes. marmonitor reads local process info and session files from the outside. This implementation is source-first: the exact low-latency tmux flow described here assumes local source + collector + dedicated statusline/click helper binaries.
 
 > **Built for the tmux + AI multi-session workflow.** If you run 5+ AI coding sessions daily across different projects, marmonitor turns context-switching from guesswork into a glance at your status bar.
 
-## What Is Different In This Fork?
+## Implementation Details
 
-This fork keeps the original marmonitor direction, but the current implementation is more opinionated around one personal workflow:
+Current implementation details:
 
 - Collector-backed statusline serving for lower-latency tmux refreshes
 - Clickable summary badges that open filtered tmux popup choosers
@@ -82,8 +81,6 @@ This fork keeps the original marmonitor direction, but the current implementatio
 - Right-aligned idle rail for reusable warm-idle Claude/Codex sessions
 - Statusline projection that separates recent-complete sessions from warm-idle inventory
 - Thin helper binaries (`marmonitor-statusline`, `marmonitor-status-click`) for tmux-facing paths
-
-If you are looking for the canonical project direction, treat upstream as the reference. If you are looking for one person's tuned tmux workflow, this fork documents that behavior.
 
 ## Supported Agents
 
@@ -97,7 +94,7 @@ If you are looking for the canonical project direction, treat upstream as the re
 
 ### 1. Install marmonitor
 
-Install this fork from source if you want the behavior documented in this README.
+Install from source if you want the behavior documented in this README.
 
 ```bash
 git clone https://github.com/lastrites2018/marmonitor.git
@@ -106,7 +103,7 @@ npm install && npm run build
 npm link
 ```
 
-Optional: if you only want the upstream baseline package instead of this fork, use:
+Optional: if you only want the upstream baseline package, use:
 
 ```bash
 npm install -g marmonitor
@@ -128,13 +125,13 @@ marmonitor update-integration
 
 This is a diagnostic command only. It does not pull, reload, or rewrite tmux state for you.
 
-For this fork's current low-latency workflow, treat that plugin path as a starting point, not as the complete source of truth. The exact behavior described in this README assumes:
+For the current low-latency workflow, treat that plugin path as a starting point, not as the complete source of truth. The exact behavior described in this README assumes:
 
 - a running collector (`marmonitor collector start`)
 - `marmonitor-statusline` on the tmux statusline path
 - `marmonitor-status-click` on tmux mouse-click ranges
 
-Those fork-specific details are personal workflow wiring layered on top of the original project.
+Those implementation-specific details are current workflow wiring layered on top of the original project.
 
 <details>
 <summary>Or add manually to ~/.tmux.conf</summary>
@@ -172,7 +169,7 @@ npm link
 
 ## Quick Start
 
-Once this fork is installed, tmux can show AI session badges in the status bar. In this fork's current tmux flow, you also get:
+Once installed, tmux can show AI session badges in the status bar. In this current tmux flow, you also get:
 
 | Shortcut | Action |
 |----------|--------|
@@ -182,7 +179,7 @@ Once this fork is installed, tmux can show AI session badges in the status bar. 
 | `Option+1~5` | Direct jump to attention session #1~5 |
 | statusline `↩` | Jump back to the previous tmux location for the current client |
 
-In this fork's current tmux flow, summary badges, numbered detail items, the idle summary, and the jump-back indicator are also clickable with the mouse.
+In this current tmux flow, summary badges, numbered detail items, the idle summary, and the jump-back indicator are also clickable with the mouse.
 
 CLI commands:
 
@@ -193,8 +190,9 @@ marmonitor watch        # Live full-screen monitor
 marmonitor collector start   # Start the background collector
 marmonitor collector status  # Inspect collector health
 marmonitor popup --summary-target phase:thinking   # Open a filtered popup chooser
-marmonitor-statusline --statusline --statusline-format tmux-badges   # Thin tmux-facing statusline client
-marmonitor-status-click sum:think                  # tmux click helper entrypoint
+marmonitor-statusline --statusline --statusline-format tmux-badges   # Thin tmux-facing statusline client (supported: compact, standard, extended, tmux-badges; wezterm-pills is currently paused)
+marmonitor-statusline --statusline --statusline-format compact --width 220 # Width hint for narrow terminals
+marmonitor-status-click sum:think                                           # tmux click helper entrypoint (`sum:think` is shorthand for `phase:thinking`)
 marmonitor help         # All commands and options
 ```
 
@@ -225,7 +223,7 @@ The upstream [marmonitor-tmux](https://github.com/mjjo16/marmonitor-tmux) plugin
 - Key bindings for popup, jump, and dock
 - Option+1~5 direct jump
 
-This fork's current statusline behavior is more specific than the stock plugin defaults and assumes additional personal tmux wiring around the shipped binaries:
+This current statusline behavior is more specific than the stock plugin defaults and assumes additional tmux wiring around the shipped binaries:
 
 - collector-backed statusline serving
 - `marmonitor-statusline` as the thin tmux-facing statusline entrypoint
@@ -236,7 +234,7 @@ This fork's current statusline behavior is more specific than the stock plugin d
 - right-aligned idle rail for warm-idle Claude/Codex sessions
 - recent-complete vs warm-idle statusline projection
 
-So if you use the upstream plugin alone, expect the baseline integration. If you want the exact fork behavior documented here, treat the plugin as optional and the helper binaries plus collector path as the authoritative tmux integration for this fork.
+So if you use the upstream plugin alone, expect the baseline integration. If you want the exact behavior documented here, treat the plugin as optional and the helper binaries plus collector path as the authoritative tmux integration here.
 
 ## Configuration
 
