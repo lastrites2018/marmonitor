@@ -103,6 +103,9 @@ async function findOriginVisiblePid(params: {
     realtimeView.jumpItems ?? [],
     attentionLimit,
     width,
+    {
+      suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+    },
   )
     .filter((item) => item.cwd === anchor.originCwd)
     .map((item) => item.pid);

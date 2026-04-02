@@ -298,6 +298,7 @@ export interface StatuslineAttentionOptions {
   nowSec?: number;
   recentCompleteMaxAgeSec?: number;
   phaseChangeHighlightWindowSec?: number;
+  suppressedRepoLabels?: Set<string>;
 }
 
 export interface IdleRightRailEntry {
@@ -334,12 +335,15 @@ export interface StatuslineRealtimeView {
   attentionItems?: AttentionItem[];
   jumpItems?: AttentionItem[];
   idleSnapshot?: IdleRightRailSnapshot;
+  suppressedRepoLabels?: Set<string>;
 }
 
 export interface StatuslineRealtimeViewOptions extends AttentionBuildOptions {
   includeFocusItems?: boolean;
   includeIdleSnapshot?: boolean;
 }
+
+const UNMATCHED_CURRENT_WORK_CPU_THRESHOLD = 0.5;
 
 export function stripTmuxFormatting(text: string): string {
   return text.replace(/#\[[^\]]*]/g, "");
@@ -733,9 +737,11 @@ export function buildStatuslineRealtimeView(
 
   let attentionItems: AttentionItem[] | undefined;
   let jumpItems: AttentionItem[] | undefined;
+  let suppressedRepoLabels: Set<string> | undefined;
   if (options.includeFocusItems) {
     attentionItems = buildAttentionItems(agents, options);
     jumpItems = orderedAttentionItems(attentionItems);
+    suppressedRepoLabels = buildSuppressedStatuslineRepoLabels(agents);
     snapshot.waitingCount = attentionItems.filter((item) => item.kind === "permission").length;
     snapshot.thinkingCount = attentionItems.filter((item) => item.kind === "thinking").length;
     snapshot.toolCount = attentionItems.filter((item) => item.kind === "tool").length;
@@ -748,6 +754,7 @@ export function buildStatuslineRealtimeView(
     idleSnapshot: options.includeIdleSnapshot
       ? selectIdleSessionsForRightRail(agents, { nowSec })
       : undefined,
+    suppressedRepoLabels,
   };
 }
 
@@ -890,6 +897,30 @@ function orderedAttentionItems(items: AttentionItem[]): AttentionItem[] {
 
     return attentionActivityTime(b) - attentionActivityTime(a);
   });
+}
+
+function hasUnmatchedCurrentWork(agent: AgentSession): boolean {
+  if (agent.status !== "Unmatched") return false;
+  if (agent.unmatchedReason === "startup_grace") return false;
+  if (agent.phase === "permission" || agent.phase === "thinking" || agent.phase === "tool") {
+    return true;
+  }
+  if (agent.cpuPercent > UNMATCHED_CURRENT_WORK_CPU_THRESHOLD) {
+    return true;
+  }
+  if (agent.workers?.some((worker) => worker.cpuPercent > UNMATCHED_CURRENT_WORK_CPU_THRESHOLD)) {
+    return true;
+  }
+  return false;
+}
+
+function buildSuppressedStatuslineRepoLabels(agents: AgentSession[]): Set<string> {
+  const suppressed = new Set<string>();
+  for (const agent of agents) {
+    if (!hasUnmatchedCurrentWork(agent)) continue;
+    suppressed.add(statuslineRepoLabel(agent.cwd));
+  }
+  return suppressed;
 }
 
 /** Build prioritized attention list for popup/jump UX.
@@ -1113,6 +1144,7 @@ export function buildStatuslineAttentionRepresentatives(
     options.recentCompleteMaxAgeSec ?? DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC;
   const highlightWindowSec =
     options.phaseChangeHighlightWindowSec ?? DEFAULT_STATUSLINE_PHASE_CHANGE_HIGHLIGHT_SEC;
+  const suppressedRepoLabels = options.suppressedRepoLabels ?? new Set<string>();
   const layout = resolveStatuslineDetailLayout(width, maxCount);
 
   const immediate = collapseImmediateStatuslineDuplicates(
@@ -1125,7 +1157,11 @@ export function buildStatuslineAttentionRepresentatives(
   );
 
   const recentComplete = collapseStatuslineAttentionDuplicates(
-    items.filter((item) => isRecentCompleteAttention(item, nowSec, recentCompleteMaxAgeSec)),
+    items.filter(
+      (item) =>
+        isRecentCompleteAttention(item, nowSec, recentCompleteMaxAgeSec) &&
+        !suppressedRepoLabels.has(statuslineRepoLabel(item.cwd)),
+    ),
     layout.pathMaxLength,
     nowSec,
     highlightWindowSec,
@@ -1144,7 +1180,8 @@ export function buildStatuslineAttentionRepresentatives(
       (item): item is AttentionItem & { kind: "active" } =>
         item.kind === "active" &&
         !selectedPids.has(item.pid) &&
-        !selectedRepoKeys.has(statuslineRepoLabel(item.cwd)),
+        !selectedRepoKeys.has(statuslineRepoLabel(item.cwd)) &&
+        !suppressedRepoLabels.has(statuslineRepoLabel(item.cwd)),
     )
     .slice(0, Math.max(0, layout.itemCount - rawItems.length));
   const fallbackLabels = buildStatuslinePathLabels(activeFallbackItems, layout.pathMaxLength);

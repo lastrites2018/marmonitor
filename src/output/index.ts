@@ -563,6 +563,9 @@ export async function renderStatusline(
         attentionLimit,
         width,
         style,
+        {
+          suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+        },
       );
       const left = buildTmuxBadgeBar(snapshot, focusText, style);
       const right = buildTmuxIdleRightRail(
@@ -578,6 +581,9 @@ export async function renderStatusline(
         jumpItems ?? attentionItems ?? [],
         attentionLimit,
         width,
+        {
+          suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+        },
       );
       return serializeWeztermPills(snapshot, focusText);
     }

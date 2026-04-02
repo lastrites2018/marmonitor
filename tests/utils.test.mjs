@@ -1711,6 +1711,172 @@ describe("statusline attention projection", () => {
     );
   });
 
+  it("suppresses matched done fallback when the repo has current unmatched work", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const realtimeView = buildStatuslineRealtimeView(
+      [
+        {
+          pid: 100,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+        {
+          pid: 101,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Unmatched",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+          cpuPercent: 0.8,
+          memoryMb: 100,
+          sessionMatched: false,
+          unmatchedReason: "session_file_missing",
+        },
+        {
+          pid: 102,
+          agentName: "Claude Code",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 4,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+      ],
+      { includeFocusItems: true, nowSec: now },
+    );
+
+    const representatives = buildStatuslineAttentionRepresentatives(
+      realtimeView.jumpItems ?? [],
+      5,
+      200,
+      {
+        nowSec: now,
+        suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+      },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid]),
+      [["thinking", 102]],
+    );
+  });
+
+  it("keeps matched current work visible even when the same repo also has unmatched work", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const realtimeView = buildStatuslineRealtimeView(
+      [
+        {
+          pid: 110,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 6,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+        {
+          pid: 111,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+        {
+          pid: 112,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Unmatched",
+          phase: "tool",
+          lastActivityAt: now - 5,
+          cpuPercent: 0.7,
+          memoryMb: 100,
+          sessionMatched: false,
+          unmatchedReason: "session_file_missing",
+        },
+      ],
+      { includeFocusItems: true, nowSec: now },
+    );
+
+    const representatives = buildStatuslineAttentionRepresentatives(
+      realtimeView.jumpItems ?? [],
+      5,
+      200,
+      {
+        nowSec: now,
+        suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+      },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid]),
+      [["thinking", 110]],
+    );
+  });
+
+  it("does not suppress matched done fallback for startup_grace unmatched sessions", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const realtimeView = buildStatuslineRealtimeView(
+      [
+        {
+          pid: 120,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+        {
+          pid: 121,
+          agentName: "Codex",
+          cwd: "/repo/vos-in-app-dashboard-frontend",
+          status: "Unmatched",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+          cpuPercent: 0.9,
+          memoryMb: 100,
+          sessionMatched: false,
+          unmatchedReason: "startup_grace",
+        },
+      ],
+      { includeFocusItems: true, nowSec: now },
+    );
+
+    const representatives = buildStatuslineAttentionRepresentatives(
+      realtimeView.jumpItems ?? [],
+      5,
+      200,
+      {
+        nowSec: now,
+        suppressedRepoLabels: realtimeView.suppressedRepoLabels,
+      },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.kind, item.pid]),
+      [["active", 120]],
+    );
+  });
+
   it("renders tmux and plain statusline focus from the projected representatives", () => {
     const now = Math.floor(Date.now() / 1000);
     const items = [

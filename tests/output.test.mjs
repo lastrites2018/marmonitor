@@ -284,7 +284,58 @@ describe("renderStatusline idle right rail", () => {
       },
     );
 
-    assert.match(text, /#\[range=user\|pid:35]5 ✅Cl recent-complete 20s#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:35]5 ✅Cl recent-complete 2\ds#\[norange]/);
     assert.doesNotMatch(text, /#\[range=user\|pid:34]5 🔧Cx tool-b 16s#\[norange]/);
+  });
+
+  it("does not let unmatched current work make the same repo's matched done session appear as focus", async () => {
+    const text = await renderStatusline(
+      [
+        {
+          pid: 40,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/vos-in-app-dashboard-frontend",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 20,
+          recentCompleteAt: now - 20,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+        {
+          pid: 41,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/vos-in-app-dashboard-frontend",
+          status: "Unmatched",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+          cpuPercent: 0.8,
+          memoryMb: 100,
+          sessionMatched: false,
+          unmatchedReason: "session_file_missing",
+        },
+        {
+          pid: 42,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 4,
+          cpuPercent: 0,
+          memoryMb: 100,
+          sessionMatched: true,
+        },
+      ],
+      "tmux-badges",
+      5,
+      220,
+      {
+        tmuxBadgeStyle: "plain",
+      },
+    );
+
+    assert.match(text, /#\[range=user\|pid:42]#\[bold]1 🤔Cl marmonitor \ds#\[nobold]#\[norange]/);
+    assert.doesNotMatch(text, /vos-in-app-dashboard-frontend/);
   });
 });
