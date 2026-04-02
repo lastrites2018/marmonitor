@@ -7,6 +7,7 @@ import { resolveConfigPath } from "./config/index.js";
 import { renderUnavailableStatusline } from "./output/unavailable.js";
 import type { StatuslineFormat } from "./output/utils.js";
 import { type TmuxJumpAnchor, findJumpAnchorByClientTty } from "./tmux/jump-anchor.js";
+import { findJumpBriefingByClientTty } from "./tmux/jump-briefing.js";
 
 const VALID_FORMATS = new Set<StatuslineFormat>([
   "compact",
@@ -27,6 +28,11 @@ const TMUX_DETAIL_MARKER = "  #[range=user|pid:";
 const TMUX_BACK_RANGE = "#[range=user|back]↩#[norange]";
 const TMUX_IDLE_MARKER = "#[range=user|sum:idle]";
 const TMUX_NORANGE = "#[norange]";
+
+export function appendJumpBriefingPrefix(output: string, briefingText?: string): string {
+  if (!briefingText) return output;
+  return `${briefingText}   ${output}`;
+}
 
 export function appendJumpBackIndicator(output: string, hasAnchor: boolean): string {
   if (!hasAnchor) return output;
@@ -214,6 +220,8 @@ export async function runStatuslineClient(args: string[] = process.argv.slice(2)
     if (options.format !== "tmux-badges" || !options.clientTty) {
       return output;
     }
+    const briefing = await findJumpBriefingByClientTty(options.clientTty);
+    output = appendJumpBriefingPrefix(output, briefing?.text);
     const agents =
       insideTmux && fastCollectorStatusline?.attentionLimit
         ? ((await readCurrentCollectorSnapshotForRequest({

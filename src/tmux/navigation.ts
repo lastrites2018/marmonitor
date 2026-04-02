@@ -19,6 +19,12 @@ import {
   readJumpAnchor,
   writeJumpAnchor,
 } from "./jump-anchor.js";
+import {
+  JUMP_BRIEFING_TTL_MS,
+  type TmuxJumpBriefing,
+  buildJumpBriefingText,
+  writeJumpBriefing,
+} from "./jump-briefing.js";
 
 interface JumpNavigationDeps {
   jumpToTmuxPane?: typeof jumpToTmuxPane;
@@ -28,6 +34,7 @@ interface JumpNavigationDeps {
   readJumpAnchor?: typeof readJumpAnchor;
   resolveTmuxClientLocation?: typeof resolveTmuxClientLocation;
   resolveTmuxJumpTarget?: typeof resolveTmuxJumpTarget;
+  writeJumpBriefing?: typeof writeJumpBriefing;
   writeJumpAnchor?: typeof writeJumpAnchor;
 }
 
@@ -58,6 +65,25 @@ async function buildJumpAnchor(
     originCwd: await resolveOriginCwd(location, deps.listTmuxPanes),
     recordedAt: now,
     lastJumpedAt: now,
+  };
+}
+
+function buildJumpBriefing(
+  location: TmuxClientLocation,
+  agent: Pick<AgentSession, "cwd"> &
+    Partial<
+      Pick<AgentSession, "agentName" | "phase" | "lastActivityAt" | "lastResponseAt" | "startedAt">
+    >,
+  reason: "keyboard" | "popup",
+): TmuxJumpBriefing {
+  const nowMs = Date.now();
+  return {
+    clientId: location.clientId,
+    clientTty: location.clientTty,
+    text: buildJumpBriefingText(agent, nowMs / 1000),
+    reason,
+    createdAt: nowMs,
+    expiresAt: nowMs + JUMP_BRIEFING_TTL_MS,
   };
 }
 
@@ -128,7 +154,10 @@ async function pruneAnchorsBestEffort(deps: JumpNavigationDeps = {}): Promise<vo
 }
 
 export async function jumpToAgentWithAnchor(
-  agent: Pick<AgentSession, "pid" | "cwd">,
+  agent: Pick<AgentSession, "pid" | "cwd"> &
+    Partial<
+      Pick<AgentSession, "agentName" | "phase" | "lastActivityAt" | "lastResponseAt" | "startedAt">
+    >,
   options: TmuxJumpOptions = {},
   deps: JumpNavigationDeps = {},
 ): Promise<TmuxJumpResult> {
@@ -136,6 +165,7 @@ export async function jumpToAgentWithAnchor(
   const readAnchor = deps.readJumpAnchor ?? readJumpAnchor;
   const resolveJumpTarget = deps.resolveTmuxJumpTarget ?? resolveTmuxJumpTarget;
   const executeJump = deps.jumpToTmuxPane ?? jumpToTmuxPane;
+  const persistBriefing = deps.writeJumpBriefing ?? writeJumpBriefing;
   const persistAnchor = deps.writeJumpAnchor ?? writeJumpAnchor;
 
   await pruneAnchorsBestEffort(deps);
@@ -167,6 +197,9 @@ export async function jumpToAgentWithAnchor(
     ? touchJumpAnchor(existingAnchor)
     : await buildJumpAnchor(origin, deps);
   await persistAnchor(anchor);
+  if (options.briefingSource) {
+    await persistBriefing(buildJumpBriefing(origin, agent, options.briefingSource));
+  }
   return result;
 }
 

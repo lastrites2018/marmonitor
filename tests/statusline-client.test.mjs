@@ -17,11 +17,13 @@ import {
 import { getDefaults } from "../dist/config/index.js";
 import {
   appendJumpBackIndicator,
+  appendJumpBriefingPrefix,
   parseStatuslineClientArgs,
   promoteTmuxPidRangeToBack,
   underlineTmuxPidRange,
 } from "../dist/statusline-client.js";
 import { writeJumpAnchor } from "../dist/tmux/jump-anchor.js";
+import { JUMP_BRIEFING_TTL_MS, writeJumpBriefing } from "../dist/tmux/jump-briefing.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -68,6 +70,14 @@ describe("statusline client", () => {
   it("appends a compact jump-back indicator only when an anchor exists", () => {
     assert.equal(appendJumpBackIndicator("Cx 2", false), "Cx 2");
     assert.equal(appendJumpBackIndicator("Cx 2", true), "Cx 2  #[range=user|back]↩#[norange]");
+  });
+
+  it("prepends a jump briefing prefix only when one exists", () => {
+    assert.equal(appendJumpBriefingPrefix("Cx 2"), "Cx 2");
+    assert.equal(
+      appendJumpBriefingPrefix("Cx 2", "↪ Cx marmonitor · 🤔 · 8s"),
+      "↪ Cx marmonitor · 🤔 · 8s   Cx 2",
+    );
   });
 
   it("inserts the jump-back indicator between tmux summary and detail items", () => {
@@ -323,6 +333,67 @@ describe("statusline client", () => {
     );
 
     assert.equal(stdout.trim(), "Cx 1  #[range=user|back]↩#[norange]");
+  });
+
+  it("prepends an active jump briefing before tmux summary output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-briefing-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 9876,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorStatusline("tmux-badges", 5, undefined, "Cx 1", root);
+    await writeJumpBriefing(
+      {
+        clientId: "$3",
+        clientTty: "/dev/ttys032",
+        text: "↪ Cx marmonitor · 🤔 · 8s",
+        reason: "keyboard",
+        createdAt: now,
+        expiresAt: now + JUMP_BRIEFING_TTL_MS,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "tmux-badges",
+        "--config",
+        requestedConfigPath,
+        "--client-tty",
+        "/dev/ttys032",
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(stdout.trim(), "↪ Cx marmonitor · 🤔 · 8s   Cx 1");
   });
 
   it("materializes width-specific collector statuslines from the collector snapshot", async () => {

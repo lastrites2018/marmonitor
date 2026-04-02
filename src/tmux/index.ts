@@ -71,6 +71,7 @@ export interface TmuxJumpResult {
 export interface TmuxJumpOptions {
   targetClient?: string;
   insideTmux?: boolean;
+  briefingSource?: "keyboard" | "popup";
 }
 
 export interface TmuxJumpBackResult {

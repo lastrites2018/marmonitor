@@ -934,6 +934,7 @@ program
 
     const result = await jumpToAgentWithAnchor(agent, {
       targetClient: typeof opts.clientTty === "string" ? opts.clientTty : undefined,
+      briefingSource: useAttention || useAttentionIndex ? "keyboard" : undefined,
     });
     if (opts.json) {
       printJumpJson(result);
@@ -1056,6 +1057,7 @@ program
       const result = await jumpToAgentWithAnchor(agent, {
         targetClient: opts.targetClient,
         insideTmux: true,
+        briefingSource: "popup",
       });
       if (!result.executed && !result.noop) {
         process.exit(1);
