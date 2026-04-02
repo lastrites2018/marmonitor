@@ -1,0 +1,244 @@
+popup 계층화 구조 메모
+
+목적
+- 이 문서는 `선택지는 줄이기보다 계층화하기` 원칙을 `marmonitor`의 popup에 직접 번역한 메모다.
+- 목표는 popup에서 항목 수를 억지로 줄이는 것이 아니라, 사용자가 전체 목록을 다 읽지 않아도 되게 만드는 것이다.
+- 즉 popup은 긴 리스트가 아니라, 우선순위가 다른 몇 개의 검색 구역으로 보여야 한다.
+
+핵심 원칙
+- 한 popup 안의 섹션 수는 최대 3~4개로 제한한다.
+- 숫자 선택은 항목에만 붙이고, 섹션 헤더에는 붙이지 않는다.
+- `current`와 `origin`은 교차 개념이지만, popup 결과 집합 안에 실제로 존재할 때는 맨 위 우선 구역으로 승격할 수 있다.
+- 섹션 순서는 고정한다.
+- 섹션 내부 정렬도 고정한다.
+- 섹션이 비면 보통 숨긴다.
+- 예외적으로 empty-state 자체가 의미가 있을 때만 아주 약하게 드러낸다.
+- marker는 최소만 사용한다.
+  - `•` 현재 위치
+  - `↩` jump-back origin
+- popup은 읽는 표면이지만, 여전히 "빨리 찾게 하는 구조"가 우선이다.
+
+왜 필요한가
+- popup이 평평한 리스트면 사용자는 항목을 전부 훑고 비교하게 된다.
+- popup의 목적은 정보를 더 많이 보여주는 것이 아니라, 검색 순서를 짧게 만드는 것이다.
+- 따라서 좋은 popup은 다음을 먼저 보이게 해야 한다.
+  - 현재 나와 직접 관련 있는 것
+  - 지금 바로 개입해야 하는 것
+  - 지금 다시 들어가기 좋은 것
+  - 그 외 inventory
+
+공통 설계 규칙
+- `Current / Return` 구역은 결과 집합 안에 해당 항목이 있을 때만 맨 위에 둔다.
+- `Needs Action`은 action-required 성격의 항목만 둔다.
+- `Ready` 또는 `Warm Idle`은 재진입 가치가 높은 세션만 둔다.
+- `More` 또는 `Other`는 낮은 우선순위 inventory 용도로만 쓴다.
+- 큰 화면이라고 무조건 더 많은 항목을 한 번에 보여주지 않는다.
+- `10개 이하 + 명확한 섹션`이 `10개 초과 + 평평한 리스트`보다 우선이다.
+
+1. Summary Popup
+
+정의
+- summary popup은 선택한 badge의 의미를 중심으로 결과를 재배치한 검색 popup이다.
+- "전체 목록"이 아니라, 선택한 summary가 가리키는 세션 중 무엇을 먼저 봐야 하는지 빠르게 찾게 해주는 화면이어야 한다.
+
+대상
+- `Cl`, `Cx`, `Gm`
+- `⏳`, `🤔`, `🔧`
+- 필요하면 `✅` 계열 summary
+
+목적
+- 선택한 summary의 직접 결과를 가장 빨리 찾게 한다.
+- 현재 위치나 jump-back origin이 같은 결과 집합 안에 있다면 그것도 함께 드러낸다.
+
+권장 섹션 구조
+- `Current / Return`
+  - 현재 pane과 같은 항목
+  - jump-back origin 항목
+  - 결과 집합 안에 있을 때만 표시
+- `Primary Matches`
+  - 클릭한 summary의 직접 결과
+  - 예: `Cl`이면 Claude 세션, `🤔`면 thinking 세션
+- `Related`
+  - 같은 summary 결과 안에서 우선순위가 다소 낮은 항목
+- `More`
+  - 페이지가 넘치거나 우선순위가 낮은 나머지
+
+정렬 규칙
+- `Current / Return`
+  - 현재 위치 먼저
+  - origin 다음
+- `Primary Matches`
+  - permission
+  - active/thinking/tool
+  - recent-complete
+  - idle/done
+- 같은 계층 안에서는 recency 우선, 그 다음 stable label 순
+
+예시
+- `Cl` popup
+  - `Current / Return`
+    - `1 • Cl marmonitor 🤔 8s`
+    - `2 ↩ Cl roam-new ✓ 1m`
+  - `Primary Matches`
+    - `3 Cl vos-proto ⏳ allow`
+    - `4 Cl skin-first-event ✓ 12m`
+    - `5 Cl fmbattle 🤔 30s`
+
+- `🤔` popup
+  - `Current / Return`
+    - `1 • Cx marmonitor 🤔 5s`
+  - `Primary Matches`
+    - `2 Cx roam-new 🤔 12s`
+    - `3 Cl vos-proto 🤔 40s`
+
+2. Idle Popup
+
+정의
+- idle popup은 "쉬고 있는 세션 목록"이 아니라, 다시 들어갈 가치가 있는 세션과 그냥 남아 있는 세션을 분리한 reuse popup이어야 한다.
+
+대상
+- `warm-idle`
+- 필요 시 `cold-idle`
+
+목적
+- 지금 다시 투입하기 좋은 세션을 inventory보다 먼저 보이게 한다.
+
+권장 섹션 구조
+- `Current / Return`
+  - 현재 위치가 idle이면 표시
+  - origin이 idle 후보 집합 안에 있으면 표시
+  - 없으면 섹션 생략
+- `Warm Idle`
+  - 지금 다시 들어가기 좋은 세션
+  - 이 popup의 핵심
+- `Cold Idle`
+  - 존재는 하지만 우선순위가 낮은 세션
+  - inventory 성격
+
+정렬 규칙
+- `Warm Idle`
+  - `idleSince`가 짧은 순
+  - `recent-complete`는 원칙상 여기에 두지 않음
+- `Cold Idle`
+  - `idleSince`가 짧은 순 또는 stable label 순
+
+표시 규칙
+- warm 항목은 시간 표시 유지
+  - 예: `marmonitor 8m`
+- cold 항목은 더 조용하게
+- permission/stalled/unmatched는 idle popup 대상이 아니다
+
+empty-state
+- 이 popup은 empty-state 자체가 의미를 가질 수 있다.
+- 예:
+  - `Warm Idle`
+    - `없음`
+  - `Cold Idle`
+    - `1 roam-new 84m`
+    - `2 skin-first-event 2h`
+
+예시
+- `Current / Return`
+  - `1 ↩ Cx marmonitor 12m`
+- `Warm Idle`
+  - `2 Cl roam-new 14m`
+  - `3 Cx fmbattle 21m`
+- `Cold Idle`
+  - `4 Cl skin-first-event 84m`
+  - `5 Cx vos-proto 2h`
+
+3. Issue Popup
+
+정의
+- issue popup은 문제 목록이 아니라, 개입 종류가 다른 문제를 구역별로 분리한 triage popup이어야 한다.
+
+대상
+- `stalled`
+- `persistent unmatched`
+- 이후 issue로 승격되는 항목
+
+목적
+- 무슨 종류의 문제인지와 무엇부터 봐야 하는지를 한 번에 보이게 한다.
+
+권장 섹션 구조
+- `Current / Return`
+  - 현재 위치나 origin이 issue 집합 안에 포함될 때만
+- `Stalled`
+  - 실제로 멈춰 있거나 반응이 끊긴 세션
+  - 가장 먼저
+- `Persistent Unmatched`
+  - 지속 unmatched
+- `Other Issues`
+  - 이후 issue 종류가 늘 때만 사용
+
+정렬 규칙
+- `Stalled`
+  - 오래 멈춘 것 먼저
+  - 또는 severity 높은 것 먼저
+- `Persistent Unmatched`
+  - 오래 unmatched인 것 먼저
+  - 같으면 stable label 순
+
+표시 규칙
+- issue popup에서는 짧은 이유 설명을 붙이는 것이 타당하다.
+  - 예: `cwd unknown`
+  - 예: `ambiguous match`
+  - 예: `session file missing`
+- 긴 진단은 popup이 아니라 `status --json` 또는 diagnostics 표면으로 보낸다.
+
+예시
+- `Stalled`
+  - `1 Cx marmonitor 6m`
+  - `2 Cl vos-proto 11m`
+- `Persistent Unmatched`
+  - `3 Cl ghostty cwd unknown`
+  - `4 Cx test-session ambiguous match`
+
+또는 current/origin이 관련되면:
+- `Current / Return`
+  - `1 ↩ Cx marmonitor stalled 6m`
+- `Stalled`
+  - `2 Cl vos-proto 11m`
+- `Persistent Unmatched`
+  - `3 Cl ghostty cwd unknown`
+
+세 popup의 요약
+- summary popup
+  - 선택한 badge 의미를 중심으로 결과를 재배치한 검색 popup
+- idle popup
+  - 다시 들어갈 가치가 있는 세션과 그냥 남아 있는 세션을 분리한 reuse popup
+- issue popup
+  - 개입 종류가 다른 문제를 구역별로 분리한 triage popup
+
+구현 우선순위
+- 1. popup에 `current / origin` marker 추가
+- 2. issue popup의 섹션 대비 강화
+- 3. idle popup의 `warm / cold` 구조 고정
+- 4. summary popup의 `Primary Matches` 구역 명시 강화
+
+메타 결론
+- popup 개선의 핵심은 항목을 더 많이 보여주는 것이 아니라, 사용자의 질문이 다른 몇 개의 검색 구역으로 나뉜 화면을 만드는 것이다.
+- `marmonitor`에서는 특히 `current/origin`, `needs action`, `ready to reuse`를 먼저 분리하는 방향이 가장 타당하다.
+
+현재 반영 상태
+- 아래 항목은 현재 구현에 이미 반영된 상태다.
+  - popup의 `current / origin` marker
+  - issue popup의 섹션 대비 강화
+  - idle popup의 `warm / cold` 구조
+  - summary popup의 `Primary Matches` 구조
+- 현재 실제 동작은 다음과 같다.
+  - summary popup
+    - 결과 집합 안에 current/origin이 유일하게 식별될 때만 `Current / Return` 섹션을 맨 위에 둔다.
+    - 나머지는 `Primary Matches`로 묶는다.
+    - current/origin이 결과를 전부 차지하면 `Primary Matches`는 생략될 수 있다.
+  - idle popup
+    - `Warm Idle`
+    - `Cold Idle`
+    - 필요할 때만 `Current / Return`
+  - issue popup
+    - `⚠ Stalled`
+    - `⚠ Persistent Unmatched`
+    - 필요할 때만 `Current / Return`
+- popup 선택은 렌더된 현재 페이지 순서를 기준으로 동작한다.
+- current/origin 승격은 `cwd` 기준 유일 매치일 때만 허용한다.
+- 모호한 경우에는 marker와 `Current / Return` 섹션을 만들지 않는다.

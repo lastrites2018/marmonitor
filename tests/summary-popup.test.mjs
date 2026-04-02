@@ -83,6 +83,14 @@ describe("summary popup item selection", () => {
       idleSince: nowSec - 11 * 60,
     },
     {
+      pid: 23,
+      agentName: "Codex",
+      cwd: "/repo/codex-cold-idle",
+      status: "Idle",
+      lastActivityAt: nowSec - 40,
+      idleSince: nowSec - 90 * 60,
+    },
+    {
       pid: 30,
       agentName: "Gemini",
       cwd: "/repo/gemini-tool",
@@ -115,10 +123,10 @@ describe("summary popup item selection", () => {
     );
   });
 
-  it("selects reusable idle Claude/Codex sessions for idle popup filters", () => {
+  it("selects reusable idle Claude/Codex sessions across warm and cold buckets for idle popup filters", () => {
     assert.deepEqual(
       selectSummaryPopupItems(agents, "idle", { nowSec }).map((agent) => agent.pid),
-      [22],
+      [22, 23],
     );
   });
 
@@ -235,7 +243,7 @@ describe("summary popup render", () => {
     );
 
     assert.match(text, /^Thinking Sessions \(1\)/);
-    assert.match(text, /1\. 🤔 Codex .*marmonitor/);
+    assert.match(text, /\n\nPrimary Matches \(1\)\n\n1\. 🤔 Codex .*marmonitor/);
     assert.match(text, /PID: 53176/);
   });
 
@@ -308,9 +316,110 @@ describe("summary popup render", () => {
     );
 
     assert.match(text, /^Sessions Needing Review \(2\)/);
-    assert.match(text, /\n\nInactive for a While \(1\)\n\n1\. ⚠ Codex stalled/);
-    assert.match(text, /\n\nUnresolved AI Processes \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.match(text, /\n\n⚠ Stalled \(1\)\n\n1\. ⚠ Codex stalled/);
+    assert.match(text, /\n\n⚠ Persistent Unmatched \(1\)\n\n2\. ⚠ Claude orphan/);
     assert.doesNotMatch(text, /transient/);
+  });
+
+  it("renders idle popup sections as warm and cold idle groups", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const text = renderSummaryPopup(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/marmonitor",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 30,
+          idleSince: now - 12 * 60,
+        },
+        {
+          pid: 2,
+          agentName: "Claude Code",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/roam-new",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 30,
+          idleSince: now - 90 * 60,
+        },
+      ],
+      "idle",
+    );
+
+    assert.match(text, /^Idle Sessions \(2\)/);
+    assert.match(text, /\n\nWarm Idle \(1\)\n\n1\. Codex marmonitor/);
+    assert.match(text, /\n\nCold Idle \(1\)\n\n2\. Claude roam-new/);
+  });
+
+  it("promotes unique current and origin matches into a dedicated popup section", () => {
+    const text = renderSummaryPopup(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 5,
+        },
+        {
+          pid: 2,
+          agentName: "Claude Code",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/roam-new",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 60,
+        },
+        {
+          pid: 3,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/fmbattle",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 20,
+        },
+      ],
+      "agent:codex",
+      {
+        currentCwd: "/Users/jaewankim/Desktop/jaewan-develop/marmonitor",
+        originCwd: "/Users/jaewankim/Desktop/jaewan-develop/fmbattle",
+      },
+    );
+
+    assert.match(text, /\n\nCurrent \/ Return\n\n1\. • 🤔 Codex marmonitor/);
+    assert.match(text, /\n\nCurrent \/ Return[\s\S]*\n\n2\. ↩ 🤔 Codex fmbattle/);
+    assert.doesNotMatch(text, /\n\nPrimary Matches/);
+  });
+
+  it("keeps current and origin markers out when the popup match is ambiguous", () => {
+    const text = renderSummaryPopup(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/shared/marmonitor",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 5,
+        },
+        {
+          pid: 2,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/shared/marmonitor",
+          status: "Active",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 10,
+        },
+      ],
+      "agent:codex",
+      {
+        currentCwd: "/Users/jaewankim/Desktop/shared/marmonitor",
+        originCwd: "/Users/jaewankim/Desktop/shared/marmonitor",
+      },
+    );
+
+    assert.doesNotMatch(text, /Current \/ Return/);
+    assert.doesNotMatch(text, /•/);
+    assert.doesNotMatch(text, /↩/);
   });
 
   it("renders a paged popup header and page-local numbering", () => {
@@ -330,7 +439,7 @@ describe("summary popup render", () => {
 
     assert.match(text, /^Codex Sessions \(12\) {2}\[Page 2\/2\]/);
     assert.match(text, /\nShowing 11-12 of 12\n/);
-    assert.match(text, /\n\n1\. Codex repo-11/);
+    assert.match(text, /\n\nPrimary Matches \(2\/12\)\n\n1\. Codex repo-11/);
     assert.match(text, /\n\n2\. Codex repo-12/);
     assert.match(text, /\n\n1-2 select {2}• {2}Enter open {2}• {2}n\/p page {2}• {2}q close$/);
   });
@@ -368,10 +477,60 @@ describe("summary popup render", () => {
 
     assert.match(text, /^Sessions Needing Review \(12\) {2}\[Page 2\/2\]/);
     assert.match(text, /\nShowing 11-12 of 12\n/);
-    assert.match(text, /\n\nInactive for a While \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
-    assert.match(text, /\n\nUnresolved AI Processes \(1\)\n\n2\. ⚠ Claude orphan/);
+    assert.match(text, /\n\n⚠ Stalled \(1\/11\)\n\n1\. ⚠ Codex stalled-11/);
+    assert.match(text, /\n\n⚠ Persistent Unmatched \(1\)\n\n2\. ⚠ Claude orphan/);
     assert.match(text, /\n\n1-2 select {2}• {2}Enter open {2}• {2}n\/p page {2}• {2}q close$/);
     assert.doesNotMatch(text, /transient/);
+  });
+
+  it("keeps popup page numbering aligned with the rendered current/return section", () => {
+    const page = buildSummaryPopupPage(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 5,
+        },
+        {
+          pid: 2,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/fmbattle",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 15,
+        },
+        {
+          pid: 3,
+          agentName: "Codex",
+          cwd: "/Users/jaewankim/Desktop/jaewan-develop/roam-new",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(Date.now() / 1000) - 20,
+        },
+      ],
+      "agent:codex",
+      1,
+      {
+        pageSize: 10,
+        context: {
+          currentCwd: "/Users/jaewankim/Desktop/jaewan-develop/marmonitor",
+          originCwd: "/Users/jaewankim/Desktop/jaewan-develop/fmbattle",
+        },
+      },
+    );
+
+    assert.deepEqual(
+      page.sections.map((section) => [section.key, section.items.map((agent) => agent.pid)]),
+      [
+        ["context", [1, 2]],
+        ["all", [3]],
+      ],
+    );
+    assert.equal(page.items[0]?.pid, 1);
+    assert.equal(page.items[1]?.pid, 2);
   });
 
   it("renders a compact footer on mid-height popups", () => {

@@ -314,6 +314,8 @@ export interface IdleRightRailSnapshot {
   entries: IdleRightRailEntry[];
 }
 
+export type IdleReuseBucket = "warm" | "cold";
+
 export interface StatuslineAttentionRepresentative {
   kind: Exclude<AttentionKind, "unmatched" | "stalled">;
   pid: number;
@@ -658,17 +660,30 @@ export function isIdleRightRailCandidate(
   agent: AgentSession,
   options: { nowSec?: number } = {},
 ): boolean {
+  return classifyIdleReuseBucket(agent, options) === "warm";
+}
+
+export function classifyIdleReuseBucket(
+  agent: AgentSession,
+  options: { nowSec?: number } = {},
+): IdleReuseBucket | undefined {
   const nowSec = options.nowSec ?? Date.now() / 1000;
   const supportedAgent = agent.agentName === "Claude Code" || agent.agentName === "Codex";
-  if (!supportedAgent) return false;
-  if (agent.status !== "Idle") return false;
+  if (!supportedAgent) return undefined;
+  if (agent.status !== "Idle") return undefined;
   if (agent.phase === "permission" || agent.phase === "thinking" || agent.phase === "tool") {
-    return false;
+    return undefined;
   }
-  if (isRecentCompleteSession(agent, nowSec, DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC)) return false;
+  if (isRecentCompleteSession(agent, nowSec, DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC)) return undefined;
   const age = idleAgeSec(agent, nowSec);
-  if (age === undefined) return false;
-  return age >= DEFAULT_WARM_IDLE_MIN_AGE_SEC && age <= DEFAULT_WARM_IDLE_MAX_AGE_SEC;
+  if (age === undefined) return undefined;
+  if (age >= DEFAULT_WARM_IDLE_MIN_AGE_SEC && age <= DEFAULT_WARM_IDLE_MAX_AGE_SEC) {
+    return "warm";
+  }
+  if (age > DEFAULT_WARM_IDLE_MAX_AGE_SEC) {
+    return "cold";
+  }
+  return undefined;
 }
 
 export function selectIdleSessionsForRightRail(

@@ -38,12 +38,9 @@ import { scanAgents } from "./scanner/index.js";
 import { getProcessStartTime } from "./scanner/process.js";
 import { detectCliStdoutPhase } from "./scanner/status.js";
 import { getAgentsSnapshot } from "./snapshot/service.js";
+import { resolveSummaryPopupContext } from "./summary-popup/context.js";
 import { resolveSummaryPopupRenderLayout } from "./summary-popup/layout.js";
-import {
-  buildSummaryPopupPage,
-  selectSummaryPopupItem,
-  selectSummaryPopupItems,
-} from "./summary-popup/model.js";
+import { buildSummaryPopupPage, selectSummaryPopupItems } from "./summary-popup/model.js";
 import { renderSummaryPopup, renderSummaryPopupPage } from "./summary-popup/render.js";
 import { loadSummaryPopupAgents } from "./summary-popup/service.js";
 import { parseSummaryPopupTarget } from "./summary-popup/shared.js";
@@ -1017,14 +1014,15 @@ program
       console.error("Collector snapshot unavailable for popup.");
       process.exit(1);
     }
+    const popupContext = await resolveSummaryPopupContext(opts.targetClient);
 
     if (!opts.interactive) {
-      console.log(renderSummaryPopup(agents, target));
+      console.log(renderSummaryPopup(agents, target, popupContext));
       return;
     }
 
     const items = selectSummaryPopupItems(agents, target);
-    console.log(renderSummaryPopup(agents, target));
+    console.log(renderSummaryPopup(agents, target, popupContext));
     if (items.length === 0) {
       return;
     }
@@ -1039,10 +1037,12 @@ program
       const popupLayout = resolveSummaryPopupRenderLayout(target, process.stdout.rows);
       const popupPage = buildSummaryPopupPage(agents, target, page, {
         pageSize: popupLayout.pageSize,
+        context: popupContext,
       });
       console.log(
         renderSummaryPopupPage(agents, target, page, popupLayout.pageSize, {
           controlsMode: popupLayout.controlsMode,
+          context: popupContext,
         }),
       );
       const maxSelectable = popupPage.items.length;
@@ -1063,8 +1063,7 @@ program
         continue;
       }
 
-      const globalSelection = popupPage.startIndex + action.selection;
-      const agent = selectSummaryPopupItem(agents, target, globalSelection);
+      const agent = popupPage.items[action.selection - 1];
       if (!agent) {
         process.exit(1);
       }

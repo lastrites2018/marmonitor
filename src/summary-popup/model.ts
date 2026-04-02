@@ -2,11 +2,21 @@ import {
   type AttentionBuildOptions,
   type AttentionItem,
   buildAttentionItems,
-  isIdleRightRailCandidate,
+  classifyIdleReuseBucket,
   isPersistentUnmatched,
 } from "../output/utils.js";
 import type { AgentSession } from "../types.js";
 import type { SummaryPopupTarget } from "./shared.js";
+
+export interface SummaryPopupContext {
+  currentCwd?: string;
+  originCwd?: string;
+}
+
+export interface SummaryPopupItemMarkers {
+  current?: boolean;
+  origin?: boolean;
+}
 
 export interface SummaryPopupSelections {
   attentionKinds: Map<number, AttentionItem["kind"]>;
@@ -18,7 +28,7 @@ export interface SummaryPopupDerivation extends SummaryPopupSelections {
 }
 
 export interface SummaryPopupSection {
-  key: "all" | "stalled" | "unmatched";
+  key: "context" | "all" | "stalled" | "unmatched";
   title: string;
   items: AgentSession[];
 }
@@ -40,6 +50,14 @@ export interface SummaryPopupPage {
   startIndex: number;
   items: AgentSession[];
   sections: SummaryPopupPageSection[];
+  markerByPid: Map<number, SummaryPopupItemMarkers>;
+}
+
+export interface SummaryPopupView {
+  title: string;
+  totalItems: number;
+  sections: SummaryPopupSection[];
+  markerByPid: Map<number, SummaryPopupItemMarkers>;
 }
 
 function isAlive(agent: AgentSession): boolean {
@@ -77,6 +95,22 @@ function orderedSummaryItems(
   });
 }
 
+function idlePopupSortTime(
+  agent: Pick<AgentSession, "idleSince" | "lastActivityAt" | "lastResponseAt" | "startedAt">,
+): number {
+  return agent.idleSince ?? agent.lastActivityAt ?? agent.lastResponseAt ?? agent.startedAt ?? 0;
+}
+
+function orderedIdlePopupItems(agents: AgentSession[]): AgentSession[] {
+  return [...agents].sort((a, b) => {
+    const idleDiff = idlePopupSortTime(b) - idlePopupSortTime(a);
+    if (idleDiff !== 0) return idleDiff;
+    const agentDiff = a.agentName.localeCompare(b.agentName);
+    if (agentDiff !== 0) return agentDiff;
+    return a.pid - b.pid;
+  });
+}
+
 function buildIssueSections(
   agents: AgentSession[],
   attentionKinds: Map<number, AttentionItem["kind"]>,
@@ -94,15 +128,74 @@ function buildIssueSections(
   return [
     {
       key: "stalled" as const,
-      title: `Inactive for a While (${stalled.length})`,
+      title: `⚠ Stalled (${stalled.length})`,
       items: stalled,
     },
     {
       key: "unmatched" as const,
-      title: `Unresolved AI Processes (${unmatched.length})`,
+      title: `⚠ Persistent Unmatched (${unmatched.length})`,
       items: unmatched,
     },
   ].filter((section) => section.items.length > 0);
+}
+
+function findUniqueContextMatch(
+  items: AgentSession[],
+  cwd: string | undefined,
+): AgentSession | undefined {
+  if (!cwd) return undefined;
+  const matches = items.filter((agent) => agent.cwd === cwd);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function applySummaryPopupContext(
+  sections: SummaryPopupSection[],
+  context?: SummaryPopupContext,
+): Pick<SummaryPopupView, "sections" | "markerByPid"> {
+  const allItems = sections.flatMap((section) => section.items);
+  const current = findUniqueContextMatch(allItems, context?.currentCwd);
+  const origin = findUniqueContextMatch(allItems, context?.originCwd);
+  const markerByPid = new Map<number, SummaryPopupItemMarkers>();
+  const contextItems: AgentSession[] = [];
+
+  if (current) {
+    markerByPid.set(current.pid, { ...(markerByPid.get(current.pid) ?? {}), current: true });
+    contextItems.push(current);
+  }
+  if (origin) {
+    markerByPid.set(origin.pid, { ...(markerByPid.get(origin.pid) ?? {}), origin: true });
+    if (!contextItems.some((agent) => agent.pid === origin.pid)) {
+      contextItems.push(origin);
+    }
+  }
+
+  if (contextItems.length === 0) {
+    return { sections, markerByPid };
+  }
+
+  const contextPidSet = new Set(contextItems.map((agent) => agent.pid));
+  const remainingSections = sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((agent) => !contextPidSet.has(agent.pid)),
+    }))
+    .map((section) =>
+      section.key === "all"
+        ? {
+            ...section,
+            title: `Primary Matches (${section.items.length})`,
+          }
+        : section,
+    )
+    .filter((section) => section.items.length > 0);
+
+  return {
+    sections: [
+      { key: "context", title: "Current / Return", items: contextItems },
+      ...remainingSections,
+    ],
+    markerByPid,
+  };
 }
 
 export function buildSummaryPopupDerivation(
@@ -125,9 +218,8 @@ export function buildSummaryPopupDerivation(
       agents.filter((agent) => isAlive(agent) && agent.agentName === "Gemini"),
       attentionKinds,
     ),
-    idle: orderedSummaryItems(
-      agents.filter((agent) => isIdleRightRailCandidate(agent, { nowSec: options.nowSec })),
-      attentionKinds,
+    idle: orderedIdlePopupItems(
+      agents.filter((agent) => classifyIdleReuseBucket(agent, { nowSec: options.nowSec })),
     ),
     "phase:permission": orderedSummaryItems(
       agents.filter((agent) => isAlive(agent) && agent.phase === "permission"),
@@ -208,41 +300,70 @@ export function buildSummaryPopupSections(
   agents: AgentSession[],
   target: SummaryPopupTarget,
   options: AttentionBuildOptions = {},
+  context?: SummaryPopupContext,
 ): SummaryPopupSection[] {
+  return buildSummaryPopupView(agents, target, options, context).sections;
+}
+
+export function buildSummaryPopupView(
+  agents: AgentSession[],
+  target: SummaryPopupTarget,
+  options: AttentionBuildOptions = {},
+  context?: SummaryPopupContext,
+): SummaryPopupView {
   const derivation = buildSummaryPopupDerivation(agents, options);
-  if (target !== "issue") {
-    return [
-      {
-        key: "all",
-        title: summaryPopupTitle(target, derivation.itemsByTarget[target].length),
-        items: derivation.itemsByTarget[target],
-      },
-    ];
-  }
-  return derivation.issueSections;
+  const baseSections =
+    target === "issue"
+      ? derivation.issueSections
+      : target === "idle"
+        ? [
+            {
+              key: "all" as const,
+              title: `Warm Idle (${derivation.itemsByTarget[target].filter((agent) => classifyIdleReuseBucket(agent, { nowSec: options.nowSec }) === "warm").length})`,
+              items: orderedIdlePopupItems(
+                derivation.itemsByTarget[target].filter(
+                  (agent) => classifyIdleReuseBucket(agent, { nowSec: options.nowSec }) === "warm",
+                ),
+              ),
+            },
+            {
+              key: "all" as const,
+              title: `Cold Idle (${derivation.itemsByTarget[target].filter((agent) => classifyIdleReuseBucket(agent, { nowSec: options.nowSec }) === "cold").length})`,
+              items: orderedIdlePopupItems(
+                derivation.itemsByTarget[target].filter(
+                  (agent) => classifyIdleReuseBucket(agent, { nowSec: options.nowSec }) === "cold",
+                ),
+              ),
+            },
+          ].filter((section) => section.items.length > 0)
+        : [
+            {
+              key: "all" as const,
+              title: `Primary Matches (${derivation.itemsByTarget[target].length})`,
+              items: derivation.itemsByTarget[target],
+            },
+          ];
+  const withContext = applySummaryPopupContext(baseSections, context);
+  return {
+    title: summaryPopupTitle(target, derivation.itemsByTarget[target].length),
+    totalItems: derivation.itemsByTarget[target].length,
+    sections: withContext.sections,
+    markerByPid: withContext.markerByPid,
+  };
 }
 
 export function buildSummaryPopupPage(
   agents: AgentSession[],
   target: SummaryPopupTarget,
   page: number,
-  options: AttentionBuildOptions & { pageSize?: number } = {},
+  options: AttentionBuildOptions & { pageSize?: number; context?: SummaryPopupContext } = {},
 ): SummaryPopupPage {
   const pageSize =
     Number.isInteger(options.pageSize) && Number(options.pageSize) > 0
       ? Number(options.pageSize)
       : 10;
-  const derivation = buildSummaryPopupDerivation(agents, options);
-  const sections =
-    target === "issue"
-      ? derivation.issueSections
-      : [
-          {
-            key: "all" as const,
-            title: summaryPopupTitle(target, derivation.itemsByTarget[target].length),
-            items: derivation.itemsByTarget[target],
-          },
-        ];
+  const view = buildSummaryPopupView(agents, target, options, options.context);
+  const sections = view.sections;
   const allItems = sections.flatMap((section) => section.items);
   const totalItems = allItems.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -266,7 +387,7 @@ export function buildSummaryPopupPage(
 
   return {
     target,
-    title: summaryPopupTitle(target, totalItems),
+    title: view.title.replace(/\(\d+\)$/, `(${totalItems})`),
     page: currentPage,
     pageSize,
     totalItems,
@@ -274,5 +395,6 @@ export function buildSummaryPopupPage(
     startIndex,
     items: pageItems,
     sections: pageSections,
+    markerByPid: view.markerByPid,
   };
 }
