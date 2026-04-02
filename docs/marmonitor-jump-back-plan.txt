@@ -44,6 +44,7 @@ marmonitor jump-back 설계안
   - `originSessionId`
   - `originWindowId`
   - `originPaneId`
+  - `originCwd`
   - `recordedAt`
   - `lastJumpedAt`
 
@@ -244,10 +245,15 @@ edge case
   - 성공 시 anchor clear
   - stale cleanup 추가
   - anchor payload는 복귀에 필요한 origin 식별자와 stale cleanup용 시간 정보만 유지
+  - origin 항목 표식을 위해 `originCwd`도 함께 저장
+  - statusline에서 origin `cwd`와 맞는 visible 항목이 정확히 하나일 때,
+    그 항목의 click target을 일반 `pid` jump가 아니라 `back`으로 승격
+  - 같은 `cwd`가 여러 개 보이면 origin 승격을 하지 않고 `↩`만 유지
 - 실제 tmux 확인
   - 실제 tmux 환경에서 `client_tty` 기준 anchor 생성
   - `jump-back` 실행 성공
   - 성공 후 anchor clear 확인
 - 로컬 사용 바인딩
   - `~/.tmux.conf`
-  - `bind-key -n M-b run-shell -b "marmonitor jump-back --client-tty #{client_tty} >/dev/null 2>&1"`
+  - `bind-key b run-shell -b "marmonitor jump-back --client-tty #{client_tty} >/dev/null 2>&1"`
+  - `bind-key -n F6 run-shell -b "marmonitor jump-back --client-tty #{client_tty} >/dev/null 2>&1"`

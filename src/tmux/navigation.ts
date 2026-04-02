@@ -7,6 +7,7 @@ import {
   jumpBackToTmuxAnchor,
   jumpToAgent,
   listTmuxClientIds,
+  listTmuxPanes,
   resolveTmuxClientLocation,
 } from "./index.js";
 import {
@@ -17,7 +18,17 @@ import {
   writeJumpAnchor,
 } from "./jump-anchor.js";
 
-function buildJumpAnchor(location: TmuxClientLocation): TmuxJumpAnchor {
+async function resolveOriginCwd(location: TmuxClientLocation): Promise<string | undefined> {
+  const panes = await listTmuxPanes();
+  return panes.find(
+    (pane) =>
+      pane.sessionName === location.sessionName &&
+      pane.windowIndex === location.windowIndex &&
+      pane.paneIndex === location.paneIndex,
+  )?.cwd;
+}
+
+async function buildJumpAnchor(location: TmuxClientLocation): Promise<TmuxJumpAnchor> {
   const now = Date.now();
   return {
     clientId: location.clientId,
@@ -25,6 +36,7 @@ function buildJumpAnchor(location: TmuxClientLocation): TmuxJumpAnchor {
     originSessionId: location.sessionId,
     originWindowId: location.windowId,
     originPaneId: location.paneId,
+    originCwd: await resolveOriginCwd(location),
     recordedAt: now,
     lastJumpedAt: now,
   };
@@ -61,7 +73,7 @@ export async function jumpToAgentWithAnchor(
     return result;
   }
 
-  const anchor = existingAnchor ? touchJumpAnchor(existingAnchor) : buildJumpAnchor(origin);
+  const anchor = existingAnchor ? touchJumpAnchor(existingAnchor) : await buildJumpAnchor(origin);
   await writeJumpAnchor(anchor);
   return result;
 }

@@ -289,6 +289,7 @@ export interface AttentionBuildOptions {
 
 const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
 const DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC = 10 * 60;
+const DEFAULT_STATUSLINE_PHASE_CHANGE_HIGHLIGHT_SEC = 20;
 const DEFAULT_WARM_IDLE_MIN_AGE_SEC = 10 * 60 + 1;
 const DEFAULT_WARM_IDLE_MAX_AGE_SEC = 60 * 60 - 1;
 const DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC = 2 * 60;
@@ -296,6 +297,7 @@ const DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC = 2 * 60;
 export interface StatuslineAttentionOptions {
   nowSec?: number;
   recentCompleteMaxAgeSec?: number;
+  phaseChangeHighlightWindowSec?: number;
 }
 
 export interface IdleRightRailEntry {
@@ -324,6 +326,7 @@ export interface StatuslineAttentionRepresentative {
   status: AgentSession["status"];
   phase: AgentSession["phase"];
   recentComplete: boolean;
+  highlighted: boolean;
 }
 
 export interface StatuslineRealtimeView {
@@ -647,6 +650,15 @@ function isRecentCompleteSession(
 ): boolean {
   if (agent.status !== "Idle" || !agent.recentCompleteAt) return false;
   return Math.max(0, nowSec - agent.recentCompleteAt) <= recentCompleteMaxAgeSec;
+}
+
+function isRecentlyHighlightedActivity(
+  at: number | undefined,
+  nowSec: number,
+  highlightWindowSec: number,
+): boolean {
+  if (!at) return false;
+  return Math.max(0, nowSec - at) <= highlightWindowSec;
 }
 
 export function isIdleRightRailCandidate(
@@ -975,6 +987,8 @@ function isRecentCompleteAttention(
 function collapseStatuslineAttentionDuplicates(
   items: AttentionItem[],
   maxLabelLength: number,
+  nowSec: number,
+  highlightWindowSec: number,
 ): StatuslineAttentionRepresentative[] {
   const grouped = new Map<string, AttentionItem[]>();
   for (const item of items) {
@@ -1006,6 +1020,11 @@ function collapseStatuslineAttentionDuplicates(
         status: representative.status,
         phase: representative.phase,
         recentComplete: true,
+        highlighted: isRecentlyHighlightedActivity(
+          representative.recentCompleteAt,
+          nowSec,
+          highlightWindowSec,
+        ),
       } satisfies StatuslineAttentionRepresentative;
     })
     .sort((a, b) => {
@@ -1032,6 +1051,8 @@ function compareImmediateDuplicateCandidates(a: AttentionItem, b: AttentionItem)
 function collapseImmediateStatuslineDuplicates(
   items: AttentionItem[],
   maxLabelLength: number,
+  nowSec: number,
+  highlightWindowSec: number,
 ): StatuslineAttentionRepresentative[] {
   const grouped = new Map<string, AttentionItem[]>();
   for (const item of items) {
@@ -1064,6 +1085,11 @@ function collapseImmediateStatuslineDuplicates(
         status: representative.status,
         phase: representative.phase,
         recentComplete: false,
+        highlighted: isRecentlyHighlightedActivity(
+          attentionActivityTime(representative),
+          nowSec,
+          highlightWindowSec,
+        ),
       } satisfies StatuslineAttentionRepresentative;
     })
     .sort((a, b) => {
@@ -1085,6 +1111,8 @@ export function buildStatuslineAttentionRepresentatives(
   const nowSec = options.nowSec ?? Date.now() / 1000;
   const recentCompleteMaxAgeSec =
     options.recentCompleteMaxAgeSec ?? DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC;
+  const highlightWindowSec =
+    options.phaseChangeHighlightWindowSec ?? DEFAULT_STATUSLINE_PHASE_CHANGE_HIGHLIGHT_SEC;
   const layout = resolveStatuslineDetailLayout(width, maxCount);
 
   const immediate = collapseImmediateStatuslineDuplicates(
@@ -1092,11 +1120,15 @@ export function buildStatuslineAttentionRepresentatives(
       (item) => item.kind === "permission" || item.kind === "thinking" || item.kind === "tool",
     ),
     layout.pathMaxLength,
+    nowSec,
+    highlightWindowSec,
   );
 
   const recentComplete = collapseStatuslineAttentionDuplicates(
     items.filter((item) => isRecentCompleteAttention(item, nowSec, recentCompleteMaxAgeSec)),
     layout.pathMaxLength,
+    nowSec,
+    highlightWindowSec,
   );
 
   const recentCompleteReserve = recentComplete.length > 0 ? 1 : 0;
@@ -1129,6 +1161,7 @@ export function buildStatuslineAttentionRepresentatives(
       status: item.status,
       phase: item.phase,
       recentComplete: false,
+      highlighted: false,
     })),
   ];
   if (rawItems.length === 0) return [];
@@ -1420,6 +1453,11 @@ function tmuxAttentionSegmentMinimal(
   return tmuxTextAccent(`${index} ${label}`, attentionBg(kind));
 }
 
+function emphasizeTmuxContent(content: string, style: TmuxBadgeStyle): string {
+  if (style === "pill") return content;
+  return `#[bold]${content}#[nobold]`;
+}
+
 export function buildTmuxBadgeBar(
   snapshot: StatuslineSnapshot,
   focusText?: string,
@@ -1529,12 +1567,13 @@ export function buildTmuxStatuslineAttentionPills(
 
   const segments = jumpItems.map((item, index) => {
     const label = formatStatuslineRepresentativeLabel(item);
-    const content =
+    const baseContent =
       style === "pill"
         ? tmuxAttentionSegment(index + 1, item.kind, label)
         : style === "minimal"
           ? tmuxAttentionSegmentMinimal(index + 1, item.kind, label)
           : `${index + 1} ${label}`;
+    const content = item.highlighted ? emphasizeTmuxContent(baseContent, style) : baseContent;
     return tmuxUserRange(`pid:${item.pid}`, content);
   });
 

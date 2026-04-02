@@ -1,9 +1,12 @@
-import { readCollectorStatuslineForRequest } from "./collector/client.js";
+import {
+  readCollectorStatuslineForRequest,
+  readCurrentCollectorSnapshotForRequest,
+} from "./collector/client.js";
 import { spawnStatuslineRefreshWorker } from "./collector/statusline-refresh.js";
 import { resolveConfigPath } from "./config/index.js";
 import { renderUnavailableStatusline } from "./output/unavailable.js";
 import type { StatuslineFormat } from "./output/utils.js";
-import { findJumpAnchorByClientTty } from "./tmux/jump-anchor.js";
+import { type TmuxJumpAnchor, findJumpAnchorByClientTty } from "./tmux/jump-anchor.js";
 
 const VALID_FORMATS = new Set<StatuslineFormat>([
   "compact",
@@ -23,6 +26,7 @@ export type StatuslineClientOptions = {
 const TMUX_DETAIL_MARKER = "  #[range=user|pid:";
 const TMUX_BACK_RANGE = "#[range=user|back]↩#[norange]";
 const TMUX_IDLE_MARKER = "#[range=user|sum:idle]";
+const TMUX_NORANGE = "#[norange]";
 
 export function appendJumpBackIndicator(output: string, hasAnchor: boolean): string {
   if (!hasAnchor) return output;
@@ -56,6 +60,61 @@ export function appendJumpBackIndicator(output: string, hasAnchor: boolean): str
   const detail = trimmedLeft.slice(detailRelativeIndex);
   const leftWithBack = `${summary}  ${TMUX_BACK_RANGE}${detail}`;
   return `${leftWithBack}${gap}${rightWithBack}`;
+}
+
+export function underlineTmuxPidRange(output: string, pid: number): string {
+  const rangeStart = `#[range=user|pid:${pid}]`;
+  const startIndex = output.indexOf(rangeStart);
+  if (startIndex === -1) return output;
+  const contentStart = startIndex + rangeStart.length;
+  const contentEnd = output.indexOf(TMUX_NORANGE, contentStart);
+  if (contentEnd === -1) return output;
+  return `${output.slice(0, contentStart)}#[underscore]${output.slice(contentStart, contentEnd)}#[nounderscore]${output.slice(contentEnd)}`;
+}
+
+export function promoteTmuxPidRangeToBack(output: string, pid: number): string {
+  const rangeStart = `#[range=user|pid:${pid}]`;
+  const startIndex = output.indexOf(rangeStart);
+  if (startIndex === -1) return output;
+  const contentStart = startIndex + rangeStart.length;
+  const contentEnd = output.indexOf(TMUX_NORANGE, contentStart);
+  if (contentEnd === -1) return output;
+  return `${output.slice(0, startIndex)}#[range=user|back]#[underscore]${output.slice(contentStart, contentEnd)}#[nounderscore]${output.slice(contentEnd)}`;
+}
+
+async function findOriginVisiblePid(params: {
+  agents: Awaited<ReturnType<typeof readCurrentCollectorSnapshotForRequest>>;
+  attentionLimit: number;
+  width?: number;
+  anchor: TmuxJumpAnchor;
+}): Promise<number | undefined> {
+  const { agents, attentionLimit, width, anchor } = params;
+  if (!agents?.length || !anchor.originCwd) {
+    return undefined;
+  }
+  const { buildStatuslineAttentionRepresentatives, buildStatuslineRealtimeView } = await import(
+    "./output/utils.js"
+  );
+  const realtimeView = buildStatuslineRealtimeView(agents, {
+    includeFocusItems: true,
+    includeIdleSnapshot: true,
+  });
+  const focusMatches = buildStatuslineAttentionRepresentatives(
+    realtimeView.jumpItems ?? [],
+    attentionLimit,
+    width,
+  )
+    .filter((item) => item.cwd === anchor.originCwd)
+    .map((item) => item.pid);
+  const idleMatches =
+    realtimeView.idleSnapshot?.entries
+      .filter((entry) => entry.cwd === anchor.originCwd)
+      .map((entry) => entry.pid) ?? [];
+  const visibleMatches = [...new Set([...focusMatches, ...idleMatches])];
+  if (visibleMatches.length === 1) {
+    return visibleMatches[0];
+  }
+  return undefined;
 }
 
 export function parseStatuslineClientArgs(args: string[]): StatuslineClientOptions {
@@ -108,9 +167,13 @@ export function parseStatuslineClientArgs(args: string[]): StatuslineClientOptio
   };
 }
 
-async function readFastCollectorStatusline(
-  options: StatuslineClientOptions,
-): Promise<string | undefined> {
+async function readFastCollectorStatusline(options: StatuslineClientOptions): Promise<
+  | {
+      value: string;
+      attentionLimit: number;
+    }
+  | undefined
+> {
   const requestedConfigPath = resolveConfigPath(options.configPath);
   const collectorStatusline = await readCollectorStatuslineForRequest({
     requestedConfigPath,
@@ -128,13 +191,18 @@ async function readFastCollectorStatusline(
       configPath: options.configPath,
     });
   }
-  return collectorStatusline.value;
+  return {
+    value: collectorStatusline.value,
+    attentionLimit: collectorStatusline.attentionLimit,
+  };
 }
 
 export async function runStatuslineClient(args: string[] = process.argv.slice(2)): Promise<string> {
   const options = parseStatuslineClientArgs(args);
   try {
-    let output = await readFastCollectorStatusline(options);
+    const requestedConfigPath = resolveConfigPath(options.configPath);
+    const fastCollectorStatusline = await readFastCollectorStatusline(options);
+    let output = fastCollectorStatusline?.value;
     if (output === undefined) {
       const { runStatuslineCommand } = await import("./collector/statusline.js");
       output = await runStatuslineCommand(options);
@@ -142,8 +210,21 @@ export async function runStatuslineClient(args: string[] = process.argv.slice(2)
     if (options.format !== "tmux-badges" || !options.clientTty) {
       return output;
     }
-    const hasAnchor = Boolean(await findJumpAnchorByClientTty(options.clientTty));
-    return appendJumpBackIndicator(output, hasAnchor);
+    const anchor = await findJumpAnchorByClientTty(options.clientTty);
+    output = appendJumpBackIndicator(output, Boolean(anchor));
+    if (!anchor || !fastCollectorStatusline?.attentionLimit) {
+      return output;
+    }
+    const agents = await readCurrentCollectorSnapshotForRequest({
+      requestedConfigPath,
+    });
+    const originPid = await findOriginVisiblePid({
+      agents,
+      attentionLimit: fastCollectorStatusline.attentionLimit,
+      width: options.width,
+      anchor,
+    });
+    return originPid ? promoteTmuxPidRangeToBack(output, originPid) : output;
   } catch {
     return renderUnavailableStatusline(options.format);
   }

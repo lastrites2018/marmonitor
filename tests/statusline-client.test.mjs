@@ -15,7 +15,12 @@ import {
   writeCollectorStatusline,
 } from "../dist/collector/store.js";
 import { getDefaults } from "../dist/config/index.js";
-import { appendJumpBackIndicator, parseStatuslineClientArgs } from "../dist/statusline-client.js";
+import {
+  appendJumpBackIndicator,
+  parseStatuslineClientArgs,
+  promoteTmuxPidRangeToBack,
+  underlineTmuxPidRange,
+} from "../dist/statusline-client.js";
 import { writeJumpAnchor } from "../dist/tmux/jump-anchor.js";
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +97,23 @@ describe("statusline client", () => {
         true,
       ),
       "Cx 1  #[range=user|back]↩#[norange]        #[range=user|back]↩#[norange]  #[range=user|sum:idle]warm Cx1#[norange] | #[range=user|pid:30]marmonitor#[norange]",
+    );
+  });
+
+  it("underlines only the requested pid range", () => {
+    assert.equal(
+      underlineTmuxPidRange(
+        "Cl 1 Cx 1  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]  #[range=user|pid:20]2 ✅Cl app 5s#[norange]",
+        20,
+      ),
+      "Cl 1 Cx 1  #[range=user|pid:10]1 🤔Cx repo 3s#[norange]  #[range=user|pid:20]#[underscore]2 ✅Cl app 5s#[nounderscore]#[norange]",
+    );
+  });
+
+  it("promotes the requested pid range into a jump-back click target", () => {
+    assert.equal(
+      promoteTmuxPidRangeToBack("Cl 1 Cx 1  #[range=user|pid:20]2 ✅Cl app 5s#[norange]", 20),
+      "Cl 1 Cx 1  #[range=user|back]#[underscore]2 ✅Cl app 5s#[nounderscore]#[norange]",
     );
   });
 
@@ -445,5 +467,269 @@ describe("statusline client", () => {
       root,
     );
     assert.equal(widthStatusline?.value, stdout.trim());
+  });
+
+  it("underlines the origin session when it is visible in the current tmux statusline", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-origin-highlight-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 2222,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorSnapshot(
+      [
+        {
+          pid: 31,
+          agentName: "Codex",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(now / 1000) - 5,
+          runtimeSource: "cli",
+        },
+      ],
+      root,
+    );
+    await writeCollectorStatusline(
+      "tmux-badges",
+      5,
+      220,
+      "Cx 1  #[range=user|pid:31]1 🤔Cx marmonitor 5s#[norange]",
+      root,
+    );
+    await writeJumpAnchor(
+      {
+        clientId: "$1",
+        clientTty: "/dev/ttys001",
+        originSessionId: "$session",
+        originWindowId: "@1",
+        originPaneId: "%1",
+        originCwd: "/repo/marmonitor",
+        recordedAt: now,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "tmux-badges",
+        "--width",
+        "220",
+        "--client-tty",
+        "/dev/ttys001",
+        "--config",
+        requestedConfigPath,
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.match(
+      stdout.trim(),
+      /#\[range=user\|back]#\[underscore]1 🤔Cx marmonitor 5s#\[nounderscore]#\[norange]/,
+    );
+  });
+
+  it("keeps the origin overlay off when the anchored cwd is not visible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-origin-hidden-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 3333,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorSnapshot(
+      [
+        {
+          pid: 31,
+          agentName: "Codex",
+          cwd: "/repo/other",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(now / 1000) - 5,
+          runtimeSource: "cli",
+        },
+      ],
+      root,
+    );
+    await writeCollectorStatusline(
+      "tmux-badges",
+      5,
+      220,
+      "Cx 1  #[range=user|pid:31]1 🤔Cx other 5s#[norange]",
+      root,
+    );
+    await writeJumpAnchor(
+      {
+        clientId: "$1",
+        clientTty: "/dev/ttys001",
+        originSessionId: "$session",
+        originWindowId: "@1",
+        originPaneId: "%1",
+        originCwd: "/repo/marmonitor",
+        recordedAt: now,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "tmux-badges",
+        "--width",
+        "220",
+        "--client-tty",
+        "/dev/ttys001",
+        "--config",
+        requestedConfigPath,
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.doesNotMatch(stdout.trim(), /#\[underscore]/);
+  });
+
+  it("keeps the origin overlay off when multiple visible items share the origin cwd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-origin-ambiguous-"));
+    const requestedConfigPath = "/tmp/nonexistent-settings.json";
+    const now = Date.now();
+    await writeCollectorHealth(
+      {
+        pid: 4444,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        configPath: requestedConfigPath,
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit: 5,
+      },
+      root,
+    );
+    await writeCollectorSnapshot(
+      [
+        {
+          pid: 31,
+          agentName: "Codex",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: Math.floor(now / 1000) - 5,
+          runtimeSource: "cli",
+        },
+        {
+          pid: 32,
+          agentName: "Claude Code",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: Math.floor(now / 1000) - 6,
+          runtimeSource: "cli",
+        },
+      ],
+      root,
+    );
+    await writeCollectorStatusline(
+      "tmux-badges",
+      5,
+      220,
+      "Cl 1 Cx 1  #[range=user|pid:31]1 🤔Cx marmonitor 5s#[norange]  #[range=user|pid:32]2 🔧Cl marmonitor +1 6s#[norange]",
+      root,
+    );
+    await writeJumpAnchor(
+      {
+        clientId: "$1",
+        clientTty: "/dev/ttys001",
+        originSessionId: "$session",
+        originWindowId: "@1",
+        originPaneId: "%1",
+        originCwd: "/repo/marmonitor",
+        recordedAt: now,
+      },
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        statuslineBinPath,
+        "--statusline",
+        "--statusline-format",
+        "tmux-badges",
+        "--width",
+        "220",
+        "--client-tty",
+        "/dev/ttys001",
+        "--config",
+        requestedConfigPath,
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.doesNotMatch(stdout.trim(), /#\[range=user\|back]#\[underscore]/);
   });
 });

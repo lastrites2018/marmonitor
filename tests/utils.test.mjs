@@ -1752,7 +1752,68 @@ describe("statusline attention projection", () => {
     );
     assert.match(
       buildTmuxStatuslineAttentionPills(items, 5, 200, "plain", { nowSec: now }) ?? "",
-      /#\[range=user\|pid:30]1 ⏳Cl marmonitor allow#\[norange] {2}#\[range=user\|pid:31]2 ✅Cx roam-new \+1 20s#\[norange]/,
+      /#\[range=user\|pid:30]#\[bold]1 ⏳Cl marmonitor allow#\[nobold]#\[norange] {2}#\[range=user\|pid:31]#\[bold]2 ✅Cx roam-new \+1 20s#\[nobold]#\[norange]/,
+    );
+  });
+
+  it("marks very recent phase transitions for short tmux emphasis", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const representatives = buildStatuslineAttentionRepresentatives(
+      [
+        {
+          kind: "thinking",
+          priority: 1,
+          pid: 90,
+          agentName: "Codex",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+        },
+        {
+          kind: "active",
+          priority: 2,
+          pid: 91,
+          agentName: "Claude Code",
+          cwd: "/repo/done",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 40,
+          recentCompleteAt: now - 40,
+        },
+      ],
+      5,
+      200,
+      { nowSec: now, phaseChangeHighlightWindowSec: 20 },
+    );
+
+    assert.deepEqual(
+      representatives.map((item) => [item.pid, item.highlighted]),
+      [
+        [90, true],
+        [91, false],
+      ],
+    );
+    assert.match(
+      buildTmuxStatuslineAttentionPills(
+        [
+          {
+            kind: "thinking",
+            priority: 1,
+            pid: 90,
+            agentName: "Codex",
+            cwd: "/repo/marmonitor",
+            status: "Active",
+            phase: "thinking",
+            lastActivityAt: now - 5,
+          },
+        ],
+        5,
+        200,
+        "plain",
+        { nowSec: now, phaseChangeHighlightWindowSec: 20 },
+      ) ?? "",
+      /#\[range=user\|pid:90]#\[bold]1 🤔Cx marmonitor 5s#\[nobold]#\[norange]/,
     );
   });
 

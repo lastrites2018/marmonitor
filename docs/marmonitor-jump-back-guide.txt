@@ -40,7 +40,7 @@ jump-back 기능 안내
    - `marmonitor jump-back --client-tty /dev/ttys032`
 
 3. 현재 로컬 tmux 바인딩
-   - `Prefix+g`
+   - `Prefix+b`
    - `F6`
 
 복귀 규칙
@@ -54,6 +54,17 @@ jump-back 기능 안내
 - 의미:
   - 지금 이 화면에서 `jump-back`으로 돌아갈 원래 위치가 저장되어 있다
 - `jump-back` 성공 후에는 anchor가 지워지므로 `↩`도 사라진다.
+
+origin 항목 표시
+- 현재 보이는 attention / idle 항목 중에서, anchor의 원래 작업 위치와 같은 `cwd`를 가진 항목이
+  정확히 하나만 보이면 그 항목이 밑줄로 표시된다.
+- 이 밑줄은 단순 강조가 아니다.
+  - 해당 항목을 클릭하면 일반 `jump --pid`가 아니라 `jump-back`으로 처리된다.
+  - 즉 `↩`를 클릭하는 것과 같은 복귀 동작을 한다.
+- 복귀가 성공하면 anchor가 clear되므로, `↩`와 밑줄 표식도 함께 사라진다.
+- 같은 `cwd`를 가진 visible 항목이 여러 개라서 origin을 하나로 특정할 수 없으면,
+  잘못된 복귀를 피하기 위해 밑줄 표식은 붙이지 않는다.
+  - 이 경우에는 기존 `↩`만 jump-back affordance로 남는다.
 
 중요한 의미 정리
 - `jump-back`은 "이 화면에서 첫 jump 전 위치로 복귀"다.
@@ -93,15 +104,17 @@ anchor가 없을 때
 
 현재 로컬 tmux 연동 상태
 - statusline click jump 가능
-- `Prefix+g`로 jump-back 가능
+- `Prefix+b`로 jump-back 가능
 - `F6`로도 jump-back 가능
 - 상태줄에 `↩` indicator 표시 가능
+- origin 항목이 유일하게 보일 때는 그 항목을 클릭해서도 jump-back 가능
 
 문제 확인 시 체크할 것
 1. 실제로 marmonitor jump가 먼저 실행되었는가
 2. 현재 화면이 같은 tmux client 문맥인가
 3. 원래 pane/window/session이 아직 살아 있는가
 4. 상태줄에 `↩`가 보이는가
+5. origin과 같은 `cwd`를 가진 visible 항목이 정확히 하나인가
 
 관련 문서
 - 설계 문서:

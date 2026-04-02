@@ -9,6 +9,7 @@ import {
   collectorHealthMaxAgeMs,
   isCollectorArtifactCurrent,
   isCollectorHealthy,
+  isCollectorHealthyForSnapshot,
   isCollectorHealthyForStatusline,
   matchesCollectorConfigPath,
 } from "./model.js";
@@ -90,6 +91,24 @@ export async function readCurrentCollectorStatusline(params: {
 }): Promise<string | undefined> {
   const statusline = await readCollectorStatuslineForRequest(params);
   return statusline?.freshness === "current" ? statusline.value : undefined;
+}
+
+export async function readCurrentCollectorSnapshotForRequest(params: {
+  requestedConfigPath?: string;
+  root?: string;
+}): Promise<AgentSession[] | undefined> {
+  const health = await readCollectorHealth(Number.MAX_SAFE_INTEGER, params.root);
+  if (!isCollectorHealthyForSnapshot(health?.value)) {
+    return undefined;
+  }
+  if (!matchesCollectorConfigPath(health?.value, params.requestedConfigPath)) {
+    return undefined;
+  }
+  const snapshot = await readCollectorSnapshot(Number.MAX_SAFE_INTEGER, params.root);
+  if (!isCollectorArtifactCurrent(snapshot, health?.value)) {
+    return undefined;
+  }
+  return snapshot?.value;
 }
 
 export async function readCollectorStatuslineForRequest(params: {
