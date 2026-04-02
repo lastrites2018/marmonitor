@@ -17,6 +17,8 @@ interface StdoutPhaseDetectionOptions {
   captureTmuxPaneOutput?: typeof captureTmuxPaneOutput;
 }
 
+const STDOUT_HEURISTIC_CACHE_NAMESPACE = "stdout-heuristic-v2";
+
 /** Determine agent activity status */
 export function determineStatus(
   cpuPercent: number,
@@ -62,7 +64,7 @@ export async function detectCliStdoutPhase(
 
     const sharedKey = `${agent.pid}:${agent.cwd}`;
     const sharedCached = await readSharedCache<SessionPhase>(
-      "stdout-heuristic",
+      STDOUT_HEURISTIC_CACHE_NAMESPACE,
       sharedKey,
       config.performance.stdoutHeuristicTtlMs,
       {
@@ -82,9 +84,9 @@ export async function detectCliStdoutPhase(
     const captureOutput = options.captureTmuxPaneOutput ?? captureTmuxPaneOutput;
 
     const target = await resolveTarget(agent);
-    if (!target) {
+    if (!target || target.match !== "pid-tree") {
       stdoutHeuristicCache.set(agent.pid, { checkedAt: nowMs, phase: undefined });
-      await writeSharedCache("stdout-heuristic", sharedKey, undefined, {
+      await writeSharedCache(STDOUT_HEURISTIC_CACHE_NAMESPACE, sharedKey, undefined, {
         cacheRoot: options.cacheRoot,
         nowMs,
       });
@@ -100,7 +102,7 @@ export async function detectCliStdoutPhase(
         )
       : undefined;
     stdoutHeuristicCache.set(agent.pid, { checkedAt: nowMs, phase });
-    await writeSharedCache("stdout-heuristic", sharedKey, phase, {
+    await writeSharedCache(STDOUT_HEURISTIC_CACHE_NAMESPACE, sharedKey, phase, {
       cacheRoot: options.cacheRoot,
       nowMs,
     });

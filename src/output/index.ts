@@ -36,6 +36,7 @@ export { renderUnavailableStatusline } from "./unavailable.js";
 
 export interface StatuslineRenderOptions {
   tmuxBadgeStyle?: TmuxBadgeStyle;
+  tmuxPidTreePids?: Set<number>;
 }
 
 export function requiresSystemInfoForStatusline(format: StatuslineFormat): boolean {
@@ -465,6 +466,10 @@ export function printJumpResult(result: TmuxJumpResult): void {
     console.log(chalk.yellow(result.message ?? "No matching tmux pane found."));
     return;
   }
+  if (result.noop) {
+    console.log(chalk.dim(result.message ?? "Already at the matched tmux pane."));
+    return;
+  }
   if (!result.executed) {
     console.log(chalk.yellow(result.message ?? "Matched tmux pane but switch failed."));
     return;
@@ -558,8 +563,25 @@ export async function renderStatusline(
 
     if (format === "tmux-badges") {
       const style = options.tmuxBadgeStyle ?? "plain";
+      const pidTreePids = options.tmuxPidTreePids;
+      const filteredJumpItems = pidTreePids
+        ? (jumpItems ?? []).filter((item) => pidTreePids.has(item.pid))
+        : (jumpItems ?? []);
+      const filteredIdleSnapshot = pidTreePids
+        ? {
+            total: (idleSnapshot?.entries ?? []).filter((entry) => pidTreePids.has(entry.pid))
+              .length,
+            claudeCount: (idleSnapshot?.entries ?? []).filter(
+              (entry) => pidTreePids.has(entry.pid) && entry.agent === "claude",
+            ).length,
+            codexCount: (idleSnapshot?.entries ?? []).filter(
+              (entry) => pidTreePids.has(entry.pid) && entry.agent === "codex",
+            ).length,
+            entries: (idleSnapshot?.entries ?? []).filter((entry) => pidTreePids.has(entry.pid)),
+          }
+        : (idleSnapshot ?? { total: 0, claudeCount: 0, codexCount: 0, entries: [] });
       const focusText = buildTmuxStatuslineAttentionPills(
-        jumpItems ?? [],
+        filteredJumpItems,
         attentionLimit,
         width,
         style,
@@ -569,7 +591,7 @@ export async function renderStatusline(
       );
       const left = buildTmuxBadgeBar(snapshot, focusText, style);
       const right = buildTmuxIdleRightRail(
-        idleSnapshot ?? { total: 0, claudeCount: 0, codexCount: 0, entries: [] },
+        filteredIdleSnapshot,
         width,
         width && width > 0 ? Math.max(0, width - visibleTextWidth(left) - 2) : 0,
       );

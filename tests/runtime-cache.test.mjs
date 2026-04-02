@@ -44,7 +44,7 @@ describe("shared stdout heuristic cache", () => {
             panePid: 1,
             cwd: agent.cwd,
           },
-          match: "cwd",
+          match: "pid-tree",
         };
       },
       captureTmuxPaneOutput: async () => {
@@ -72,6 +72,59 @@ describe("shared stdout heuristic cache", () => {
     assert.equal(second, "permission");
     assert.equal(resolveCalls, 1);
     assert.equal(captureCalls, 1);
+  });
+
+  it("ignores cwd-only tmux matches for stdout heuristic phase detection", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "marmonitor-stdout-cwd-only-"));
+    const config = getDefaults();
+    config.performance.stdoutHeuristicTtlMs = 10_000;
+    const agent = { pid: 91_003, cwd: "/repo/shared-stdout-cwd-only" };
+    let resolveCalls = 0;
+    let captureCalls = 0;
+
+    stdoutHeuristicCache.clear();
+    const first = await detectCliStdoutPhase(agent, config, {
+      cacheRoot,
+      nowMs: 1_000,
+      resolveTmuxJumpTarget: async () => {
+        resolveCalls += 1;
+        return {
+          pane: {
+            target: "0:1.1",
+            sessionName: "0",
+            windowIndex: 1,
+            paneIndex: 1,
+            panePid: 1,
+            cwd: agent.cwd,
+          },
+          match: "cwd",
+        };
+      },
+      captureTmuxPaneOutput: async () => {
+        captureCalls += 1;
+        return "Action required\n1. Allow once";
+      },
+    });
+
+    assert.equal(first, undefined);
+    assert.equal(resolveCalls, 1);
+    assert.equal(captureCalls, 0);
+
+    stdoutHeuristicCache.clear();
+    const second = await detectCliStdoutPhase(agent, config, {
+      cacheRoot,
+      nowMs: 2_000,
+      resolveTmuxJumpTarget: async () => {
+        throw new Error("shared cache miss");
+      },
+      captureTmuxPaneOutput: async () => {
+        throw new Error("shared cache miss");
+      },
+    });
+
+    assert.equal(second, undefined);
+    assert.equal(resolveCalls, 1);
+    assert.equal(captureCalls, 0);
   });
 
   it("reuses negative stdout heuristic result across in-memory cache clears", async () => {

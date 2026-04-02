@@ -205,6 +205,7 @@ export async function runStatuslineClient(args: string[] = process.argv.slice(2)
   try {
     const requestedConfigPath = resolveConfigPath(options.configPath);
     const fastCollectorStatusline = await readFastCollectorStatusline(options);
+    const insideTmux = Boolean(process.env.TMUX);
     let output = fastCollectorStatusline?.value;
     if (output === undefined) {
       const { runStatuslineCommand } = await import("./collector/statusline.js");
@@ -213,14 +214,17 @@ export async function runStatuslineClient(args: string[] = process.argv.slice(2)
     if (options.format !== "tmux-badges" || !options.clientTty) {
       return output;
     }
+    const agents =
+      insideTmux && fastCollectorStatusline?.attentionLimit
+        ? ((await readCurrentCollectorSnapshotForRequest({
+            requestedConfigPath,
+          })) ?? [])
+        : [];
     const anchor = await findJumpAnchorByClientTty(options.clientTty);
     output = appendJumpBackIndicator(output, Boolean(anchor));
     if (!anchor || !fastCollectorStatusline?.attentionLimit) {
       return output;
     }
-    const agents = await readCurrentCollectorSnapshotForRequest({
-      requestedConfigPath,
-    });
     const originPid = await findOriginVisiblePid({
       agents,
       attentionLimit: fastCollectorStatusline.attentionLimit,

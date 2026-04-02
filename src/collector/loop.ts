@@ -1,6 +1,7 @@
 import { renderStatusline } from "../output/index.js";
 import type { StatuslineFormat } from "../output/utils.js";
 import { scanAgents } from "../scanner/index.js";
+import { buildTmuxPidTreeMatchSet, getTmuxRuntimeSnapshot } from "../tmux/index.js";
 import { VERSION } from "../version.js";
 import type { CollectorHealth } from "./model.js";
 import { loadCollectorRuntime } from "./runtime.js";
@@ -59,9 +60,14 @@ async function writeRenderedStatuslines(
   width: number | undefined,
   tmuxBadgeStyle: "plain" | "minimal" | "pill",
 ): Promise<void> {
+  const tmuxPidTreePids =
+    formats.includes("tmux-badges") && snapshot.length > 0
+      ? buildTmuxPidTreeMatchSet(snapshot, await getTmuxRuntimeSnapshot())
+      : undefined;
   for (const format of formats) {
     const rendered = await renderStatusline(snapshot, format, attentionLimit, width, {
       tmuxBadgeStyle,
+      tmuxPidTreePids: format === "tmux-badges" ? tmuxPidTreePids : undefined,
     });
     await writeCollectorStatusline(format, attentionLimit, width, rendered);
     await writeCachedStatusline(format, attentionLimit, width, rendered);

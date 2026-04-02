@@ -338,4 +338,65 @@ describe("renderStatusline idle right rail", () => {
     assert.match(text, /#\[range=user\|pid:42]#\[bold]1 🤔Cl marmonitor \ds#\[nobold]#\[norange]/);
     assert.doesNotMatch(text, /vos-in-app-dashboard-frontend/);
   });
+
+  it("filters tmux-badges focus and idle rail down to pid-tree tmux matches", async () => {
+    const text = await renderStatusline(
+      [
+        {
+          pid: 50,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/vos-in-app-dashboard-frontend",
+          status: "Active",
+          phase: "thinking",
+          lastActivityAt: now - 5,
+          cpuPercent: 8,
+          memoryMb: 100,
+        },
+        {
+          pid: 51,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/vos-in-app-dashboard-frontend",
+          status: "Idle",
+          phase: "done",
+          lastActivityAt: now - 12 * 60,
+          idleSince: now - 12 * 60,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+        {
+          pid: 52,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/marmonitor",
+          status: "Active",
+          phase: "tool",
+          lastActivityAt: now - 8,
+          cpuPercent: 5,
+          memoryMb: 100,
+        },
+        {
+          pid: 53,
+          agentName: "Claude Code",
+          cwd: "/Users/macrent/work/roam-new",
+          status: "Idle",
+          lastActivityAt: now - 20 * 60,
+          idleSince: now - 20 * 60,
+          cpuPercent: 0,
+          memoryMb: 100,
+        },
+      ],
+      "tmux-badges",
+      5,
+      220,
+      {
+        tmuxBadgeStyle: "plain",
+        tmuxPidTreePids: new Set([52, 53]),
+      },
+    );
+
+    assert.doesNotMatch(text, /vos-in-app-dashboard-frontend/);
+    assert.doesNotMatch(text, /vos-in-app-da…ard-frontend/);
+    assert.match(text, /🔧Cl marmonitor/);
+    assert.match(text, /warm Cl1/);
+    assert.match(text, /roam-new 20m/);
+  });
 });

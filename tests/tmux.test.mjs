@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildTmuxAnchorReturnCommands,
   buildTmuxPaneJumpCommands,
+  buildTmuxPidTreeMatchSet,
   getTmuxRuntimeSnapshot,
   isPidInTree,
   parseProcessTree,
@@ -94,6 +95,23 @@ describe("selectTmuxPaneForAgent", () => {
     const result = selectTmuxPaneForAgent({ pid: 999, cwd: "/repo/b" }, panes, childMap);
     assert.equal(result?.pane.target, "mjjo:2.1");
     assert.equal(result?.match, "cwd");
+  });
+
+  it("builds a pid-tree-only match set for tmux statusline surfaces", () => {
+    const childMap = parseProcessTree("100 1\n200 100\n700 500\n");
+    const matched = buildTmuxPidTreeMatchSet(
+      [
+        { pid: 200, cwd: "/repo/a" },
+        { pid: 999, cwd: "/repo/b" },
+        { pid: 700, cwd: "/repo/b" },
+      ],
+      { panes, childMap },
+    );
+
+    assert.deepEqual(
+      [...matched].sort((a, b) => a - b),
+      [200, 700],
+    );
   });
 });
 

@@ -25,6 +25,20 @@ export interface TmuxRuntimeSnapshot {
   childMap: Map<number, number[]>;
 }
 
+export function buildTmuxPidTreeMatchSet(
+  agents: Array<Pick<AgentSession, "pid" | "cwd">>,
+  snapshot: TmuxRuntimeSnapshot,
+): Set<number> {
+  const matched = new Set<number>();
+  for (const agent of agents) {
+    const target = selectTmuxPaneForAgent(agent, snapshot.panes, snapshot.childMap);
+    if (target?.match === "pid-tree") {
+      matched.add(agent.pid);
+    }
+  }
+  return matched;
+}
+
 export interface TmuxClientLocation {
   clientId: string;
   clientTty: string;
@@ -44,6 +58,7 @@ interface TmuxRuntimeSnapshotLoaders {
 export interface TmuxJumpResult {
   found: boolean;
   executed: boolean;
+  noop?: boolean;
   insideTmux: boolean;
   pid: number;
   match?: "pid-tree" | "cwd";

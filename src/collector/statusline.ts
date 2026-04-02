@@ -4,6 +4,7 @@ import { renderUnavailableStatusline } from "../output/unavailable.js";
 import type { StatuslineFormat } from "../output/utils.js";
 import { releaseStatuslineRefreshLock } from "../snapshot-cache.js";
 import { getAgentsSnapshot } from "../snapshot/service.js";
+import { buildTmuxPidTreeMatchSet, getTmuxRuntimeSnapshot } from "../tmux/index.js";
 import {
   readCollectorStatuslineForRequest,
   readHealthyCollectorSnapshotForRequest,
@@ -17,6 +18,14 @@ import {
   writeCachedStatusline,
   writeCollectorStatusline,
 } from "./store.js";
+
+async function buildTmuxPidTreePids(
+  format: StatuslineFormat,
+  agents: Awaited<ReturnType<typeof readHealthyCollectorSnapshotForRequest>> | undefined,
+): Promise<Set<number> | undefined> {
+  if (format !== "tmux-badges" || !agents?.length) return undefined;
+  return buildTmuxPidTreeMatchSet(agents, await getTmuxRuntimeSnapshot());
+}
 
 export async function runStatuslineCommand(params: {
   format: StatuslineFormat;
@@ -55,12 +64,19 @@ export async function runStatuslineCommand(params: {
       requestedConfigPath,
     });
     if (configAwareCollectorSnapshot) {
+      const tmuxPidTreePids = await buildTmuxPidTreePids(
+        params.format,
+        configAwareCollectorSnapshot,
+      );
       const rendered = await renderStatusline(
         configAwareCollectorSnapshot,
         params.format,
         attentionLimit,
         params.width,
-        renderOptions,
+        {
+          ...renderOptions,
+          tmuxPidTreePids,
+        },
       );
       await writeCollectorStatusline(params.format, attentionLimit, params.width, rendered);
       return rendered;
@@ -118,7 +134,10 @@ export async function runStatuslineCommand(params: {
           params.format,
           attentionLimit,
           params.width,
-          renderOptions,
+          {
+            ...renderOptions,
+            tmuxPidTreePids: await buildTmuxPidTreePids(params.format, decision.value),
+          },
         );
         if (decision.freshness === "fresh") {
           await writeCachedStatusline(params.format, attentionLimit, params.width, rendered);
@@ -138,7 +157,10 @@ export async function runStatuslineCommand(params: {
           params.format,
           attentionLimit,
           params.width,
-          renderOptions,
+          {
+            ...renderOptions,
+            tmuxPidTreePids: await buildTmuxPidTreePids(params.format, agents),
+          },
         );
         await writeCachedStatusline(params.format, attentionLimit, params.width, rendered);
         return rendered;
