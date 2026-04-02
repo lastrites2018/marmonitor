@@ -29,9 +29,15 @@ const TMUX_BACK_RANGE = "#[range=user|back]↩#[norange]";
 const TMUX_IDLE_MARKER = "#[range=user|sum:idle]";
 const TMUX_NORANGE = "#[norange]";
 
+function renderJumpBriefingPill(text: string): string {
+  const bg = "#89b4fa";
+  const fg = "#11111b";
+  return `#[fg=${bg},bg=#1e1e2e]#[bold,fg=${fg},bg=${bg}] ${text} #[fg=${bg},bg=#1e1e2e]#[default]`;
+}
+
 export function appendJumpBriefingPrefix(output: string, briefingText?: string): string {
   if (!briefingText) return output;
-  return `${briefingText}   ${output}`;
+  return `${renderJumpBriefingPill(briefingText)}   ${output}`;
 }
 
 export function appendJumpBackIndicator(output: string, hasAnchor: boolean): string {

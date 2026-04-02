@@ -76,7 +76,7 @@ describe("statusline client", () => {
     assert.equal(appendJumpBriefingPrefix("Cx 2"), "Cx 2");
     assert.equal(
       appendJumpBriefingPrefix("Cx 2", "↪ Cx marmonitor · 🤔 · 8s"),
-      "↪ Cx marmonitor · 🤔 · 8s   Cx 2",
+      "#[fg=#89b4fa,bg=#1e1e2e]#[bold,fg=#11111b,bg=#89b4fa] ↪ Cx marmonitor · 🤔 · 8s #[fg=#89b4fa,bg=#1e1e2e]#[default]   Cx 2",
     );
   });
 
@@ -393,7 +393,10 @@ describe("statusline client", () => {
       },
     );
 
-    assert.equal(stdout.trim(), "↪ Cx marmonitor · 🤔 · 8s   Cx 1");
+    assert.equal(
+      stdout.trim(),
+      "#[fg=#89b4fa,bg=#1e1e2e]#[bold,fg=#11111b,bg=#89b4fa] ↪ Cx marmonitor · 🤔 · 8s #[fg=#89b4fa,bg=#1e1e2e]#[default]   Cx 1",
+    );
   });
 
   it("materializes width-specific collector statuslines from the collector snapshot", async () => {
