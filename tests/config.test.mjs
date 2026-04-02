@@ -48,6 +48,8 @@ describe("getDefaults", () => {
     assert.equal(config.integration.tmux.keys.jumpPopup, "j");
     assert.equal(config.integration.tmux.keys.dockToggle, "m");
     assert.deepEqual(config.integration.tmux.keys.directJump, ["M-1", "M-2", "M-3", "M-4", "M-5"]);
+    assert.equal(config.integration.tmux.jumpBack.autoReturn.enabled, false);
+    assert.equal(config.integration.tmux.jumpBack.autoReturn.afterIdleMin, 30);
     assert.equal(config.integration.wezterm.enabled, false);
     assert.equal(config.integration.wezterm.statusTtlSec, 15);
     assert.equal(config.integration.banner.install, true);
@@ -161,6 +163,7 @@ describe("loadConfig", () => {
       assert.equal(config.intervention.enabled, false);
       assert.equal(config.integration.tmux.badgeStyle, "plain");
       assert.equal(config.integration.tmux.keys.attentionPopup, "a");
+      assert.equal(config.integration.tmux.jumpBack.autoReturn.enabled, false);
       assert.equal(config.integration.wezterm.enabled, false);
       assert.equal(config.integration.wezterm.statusTtlSec, 15);
       assert.equal(config.integration.banner.install, true);
@@ -312,6 +315,35 @@ describe("loadConfig", () => {
       assert.equal(config.integration.tmux.keys.jumpPopup, "J");
       assert.equal(config.integration.tmux.keys.dockToggle, "m");
       assert.deepEqual(config.integration.tmux.keys.directJump, ["M-F1", "M-F2"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges tmux jump-back auto-return overrides", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "marmonitor-config-"));
+    const path = join(dir, "settings.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        integration: {
+          tmux: {
+            jumpBack: {
+              autoReturn: {
+                enabled: true,
+                afterIdleMin: 45,
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    try {
+      const config = await loadConfig(path);
+      assert.equal(config.integration.tmux.jumpBack.autoReturn.enabled, true);
+      assert.equal(config.integration.tmux.jumpBack.autoReturn.afterIdleMin, 45);
+      assert.equal(config.integration.tmux.badgeStyle, "plain");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

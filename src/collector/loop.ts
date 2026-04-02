@@ -1,7 +1,12 @@
 import { renderStatusline } from "../output/index.js";
 import type { StatuslineFormat } from "../output/utils.js";
 import { scanAgents } from "../scanner/index.js";
-import { buildTmuxPidTreeMatchSet, getTmuxRuntimeSnapshot } from "../tmux/index.js";
+import { runStaleJumpAutoReturnMaintenance } from "../tmux/auto-return.js";
+import {
+  type TmuxRuntimeSnapshot,
+  buildTmuxPidTreeMatchSet,
+  getTmuxRuntimeSnapshot,
+} from "../tmux/index.js";
 import { VERSION } from "../version.js";
 import type { CollectorHealth } from "./model.js";
 import { loadCollectorRuntime } from "./runtime.js";
@@ -59,10 +64,11 @@ async function writeRenderedStatuslines(
   attentionLimit: number,
   width: number | undefined,
   tmuxBadgeStyle: "plain" | "minimal" | "pill",
+  tmuxSnapshot?: TmuxRuntimeSnapshot,
 ): Promise<void> {
   const tmuxPidTreePids =
     formats.includes("tmux-badges") && snapshot.length > 0
-      ? buildTmuxPidTreeMatchSet(snapshot, await getTmuxRuntimeSnapshot())
+      ? buildTmuxPidTreeMatchSet(snapshot, tmuxSnapshot ?? (await getTmuxRuntimeSnapshot()))
       : undefined;
   for (const format of formats) {
     const rendered = await renderStatusline(snapshot, format, attentionLimit, width, {
@@ -95,12 +101,23 @@ async function refreshCollectorArtifacts(
   });
 
   await writeCollectorSnapshot(snapshot);
+  const needsTmuxSnapshot =
+    snapshot.length > 0 &&
+    ((options.formats ?? DEFAULT_COLLECTOR_FORMATS).includes("tmux-badges") ||
+      runtime.config.integration.tmux.jumpBack.autoReturn.enabled);
+  const tmuxSnapshot = needsTmuxSnapshot ? await getTmuxRuntimeSnapshot() : undefined;
   await writeRenderedStatuslines(
     snapshot,
     options.formats ?? DEFAULT_COLLECTOR_FORMATS,
     runtime.config.display.statuslineAttentionLimit,
     options.width,
     runtime.config.integration.tmux.badgeStyle,
+    tmuxSnapshot,
+  );
+  await runStaleJumpAutoReturnMaintenance(
+    snapshot,
+    runtime.config.integration.tmux.jumpBack.autoReturn,
+    tmuxSnapshot,
   );
   const completedAt = Date.now();
   await writeCollectorHealth({

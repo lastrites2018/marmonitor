@@ -41,6 +41,8 @@ describe("config CLI helpers", () => {
     const output = runCli(["settings-init", "--advanced", "--stdout"]);
     const parsed = JSON.parse(output);
     assert.equal(parsed.integration.tmux.badgeStyle, "plain");
+    assert.equal(parsed.integration.tmux.jumpBack.autoReturn.enabled, false);
+    assert.equal(parsed.integration.tmux.jumpBack.autoReturn.afterIdleMin, 30);
     assert.equal(parsed.integration.wezterm.enabled, false);
     assert.equal(parsed.integration.banner.install, true);
     assert.ok(Array.isArray(parsed.paths.claudeProjects));
@@ -64,6 +66,7 @@ describe("config CLI helpers", () => {
   it("documents tmux badge style in help output", () => {
     const output = runCli(["--help"]);
     assert.match(output, /integration\.tmux\.badgeStyle/);
+    assert.match(output, /integration\.tmux\.jumpBack\.autoReturn/);
     assert.match(output, /plain" \| "minimal" \| "pill/);
   });
 

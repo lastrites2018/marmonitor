@@ -12,6 +12,9 @@ export interface TmuxJumpAnchor {
   originWindowId: string;
   originPaneId: string;
   originCwd?: string;
+  lastJumpTargetSessionId?: string;
+  lastJumpTargetWindowId?: string;
+  lastJumpTargetPaneId?: string;
   recordedAt: number;
   lastJumpedAt?: number;
 }

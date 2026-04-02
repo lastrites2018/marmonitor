@@ -24,12 +24,15 @@ function createDeferred() {
 
 describe("parseTmuxPanes", () => {
   it("parses tmux list-panes output", () => {
-    const panes = parseTmuxPanes("mjjo:1.2\t1234\t/Users/macrent/.ai/projects/mjjo\n");
+    const panes = parseTmuxPanes("mjjo:1.2\t1234\t/Users/macrent/.ai/projects/mjjo\t$1\t@2\t%7\n");
     assert.deepEqual(panes, [
       {
         target: "mjjo:1.2",
         sessionName: "mjjo",
+        sessionId: "$1",
+        windowId: "@2",
         windowIndex: 1,
+        paneId: "%7",
         paneIndex: 2,
         panePid: 1234,
         cwd: "/Users/macrent/.ai/projects/mjjo",
@@ -51,6 +54,14 @@ describe("parseTmuxClientLocation", () => {
     assert.equal(location?.clientTty, "/dev/ttys003");
     assert.equal(location?.sessionId, "$0");
     assert.equal(location?.paneId, "%0");
+  });
+
+  it("parses optional client activity when tmux provides it", () => {
+    const location = parseTmuxClientLocation(
+      "$1\t/dev/ttys003\t$0\tvos-fr\t@0\t1\t%0\t1\t1712020000\n",
+    );
+    assert.equal(location?.clientId, "$1");
+    assert.equal(location?.clientActivityAt, 1712020000);
   });
 });
 

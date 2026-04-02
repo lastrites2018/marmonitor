@@ -9,7 +9,10 @@ const execFileAsync = promisify(execFile);
 export interface TmuxPane {
   target: string;
   sessionName: string;
+  sessionId?: string;
+  windowId?: string;
   windowIndex: number;
+  paneId?: string;
   paneIndex: number;
   panePid: number;
   cwd: string;
@@ -48,6 +51,7 @@ export interface TmuxClientLocation {
   windowIndex: number;
   paneId: string;
   paneIndex: number;
+  clientActivityAt?: number;
 }
 
 interface TmuxRuntimeSnapshotLoaders {
@@ -91,7 +95,7 @@ export function parseTmuxPanes(raw: string): TmuxPane[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .flatMap((line) => {
-      const [target, panePidRaw, cwd] = line.split("\t");
+      const [target, panePidRaw, cwd, sessionId, windowId, paneId] = line.split("\t");
       if (!target || !panePidRaw || !cwd) return [];
       const [sessionName, coords] = target.split(":");
       if (!sessionName || !coords) return [];
@@ -100,7 +104,10 @@ export function parseTmuxPanes(raw: string): TmuxPane[] {
       const pane = {
         target,
         sessionName,
+        sessionId,
+        windowId,
         windowIndex: Number.parseInt(windowIndexRaw, 10),
+        paneId,
         paneIndex: Number.parseInt(paneIndexRaw, 10),
         panePid: Number.parseInt(panePidRaw, 10),
         cwd,
@@ -120,6 +127,7 @@ export function parseTmuxClientLocation(raw: string): TmuxClientLocation | undef
     windowIndexRaw,
     paneId,
     paneIndexRaw,
+    clientActivityRaw,
   ] = raw.replace(/\r?\n$/, "").split("\t");
   const clientId = clientIdRaw || clientTty;
   const windowIndex = Number.parseInt(windowIndexRaw ?? "", 10);
@@ -145,6 +153,9 @@ export function parseTmuxClientLocation(raw: string): TmuxClientLocation | undef
     windowIndex,
     paneId,
     paneIndex,
+    clientActivityAt: Number.isFinite(Number.parseInt(clientActivityRaw ?? "", 10))
+      ? Number.parseInt(clientActivityRaw ?? "", 10)
+      : undefined,
   };
 }
 
@@ -213,7 +224,7 @@ export async function listTmuxPanes(): Promise<TmuxPane[]> {
         "list-panes",
         "-a",
         "-F",
-        "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}",
+        "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}\t#{session_id}\t#{window_id}\t#{pane_id}",
       ]),
     );
     return parseTmuxPanes(stdout);
@@ -234,18 +245,23 @@ export async function getProcessTree(): Promise<Map<number, number[]>> {
 }
 
 export async function listTmuxClientIds(): Promise<string[]> {
+  const locations = await listTmuxClientLocations();
+  return locations.map((location) => location.clientId);
+}
+
+export async function listTmuxClientLocations(): Promise<TmuxClientLocation[]> {
   try {
     const { stdout } = await profileAsync("tmux", "list_clients", () =>
       execFileAsync("tmux", [
         "list-clients",
         "-F",
-        "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+        "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}\t#{client_activity}",
       ]),
     );
     return stdout
       .split("\n")
       .map((line) => parseTmuxClientLocation(line))
-      .flatMap((location) => (location ? [location.clientId] : []));
+      .flatMap((location) => (location ? [location] : []));
   } catch {
     return [];
   }
@@ -265,7 +281,7 @@ export async function resolveTmuxClientLocation(
         execFileAsync("tmux", [
           "list-clients",
           "-F",
-          "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+          "#{client_id}\t#{client_tty}\t#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{pane_id}\t#{pane_index}\t#{client_activity}",
         ]),
       );
       const location = stdout

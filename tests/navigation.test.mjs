@@ -124,7 +124,10 @@ describe("tmux navigation", () => {
           pane: {
             target: "work:1.2",
             sessionName: "work",
+            sessionId: "$target",
+            windowId: "@2",
             windowIndex: 1,
+            paneId: "%2",
             paneIndex: 2,
             panePid: 101,
             cwd: "/repo/marmonitor",
@@ -149,6 +152,9 @@ describe("tmux navigation", () => {
     assert.equal(jumpCalls, 1);
     assert.equal(writtenAnchor?.originPaneId, "%1");
     assert.equal(writtenAnchor?.originCwd, "/repo/marmonitor");
+    assert.equal(writtenAnchor?.lastJumpTargetSessionId, "$target");
+    assert.equal(writtenAnchor?.lastJumpTargetWindowId, "@2");
+    assert.equal(writtenAnchor?.lastJumpTargetPaneId, "%2");
     assert.equal(writtenBriefing, undefined);
   });
 

@@ -1,0 +1,269 @@
+stale jump auto-return 기능 정의
+
+현재 구현 상태
+- 2026-04-02 기준으로 1차 구현이 반영되었다.
+- 구현된 범위:
+  - opt-in 설정
+  - idle threshold 설정
+  - jump anchor에 마지막 jump target 식별자 저장
+  - collector tick 종료 시점의 maintenance에서 stale jump auto-return 판정
+  - 복귀 성공 시 anchor clear
+  - origin 무효 시 anchor clear
+- 아직 구현하지 않은 범위:
+  - 우클릭 anchor clear UX
+  - 현재 사용자가 그 client를 "보고 있는지"의 완전한 판정
+  - 별도 background worker / housekeeping 경로 분리
+
+현재 구현 계약
+- 설정:
+  - `integration.tmux.jumpBack.autoReturn.enabled`
+  - `integration.tmux.jumpBack.autoReturn.afterIdleMin`
+- 기본값:
+  - `enabled: false`
+  - `afterIdleMin: 30`
+- 현재 구현은 기본 off이며, 명시적으로 켠 경우에만 동작한다.
+
+목적
+- jump한 세션이 충분히 오래 idle 상태로 굳었을 때, 나중에 사용자가 그 client나 작업 영역으로 다시 돌아왔을 때
+  이미 원래 작업 흐름이 복원된 상태를 제공하는 것을 목표로 한다.
+- 핵심은 "자동 복귀가 보이게 만드는 것"이 아니라, stale jump 상태를 조용히 정리하는 것이다.
+
+문제 정의
+- tmux에서는 jump한 세션이 닫히지 않아도 실제 작업 맥락은 끝났을 수 있다.
+- 이 경우 jump target이 오래 idle 상태로 남아 있고, 사용자가 다시 그 client를 보게 되면
+  origin보다 stale jump target이 먼저 보이는 상태가 된다.
+- 사용자는 그 순간 "왜 여기 있지?"를 다시 생각해야 하고, 추가 인지가 생긴다.
+
+기능 정의
+- 현재 tmux client에 jump anchor가 있고,
+- 그 client가 여전히 마지막 jump target 위에 머물러 있으며,
+- 그 jump target이 충분히 오래 idle 상태일 때,
+- 사용자의 추가 조작 없이 origin으로 조용히 복귀시킨다.
+
+핵심 성격
+- 이 기능은 일반적인 auto jump-back이 아니다.
+- 더 정확히는 stale jump 상태를 background에서 정리하는 기능이다.
+- 재방문 시 전환을 보이게 하기보다, 이미 복원된 상태를 제공하는 쪽이 목적이다.
+- 별도의 `정착` 상태를 도입하지 않는다.
+- 판단은 "stale jump target인가"만으로 충분해야 한다.
+
+기본 원칙
+1. opt-in
+- 기본값은 꺼짐
+- 사용자가 설정으로 켜야 한다.
+
+2. 설정 가능
+- idle threshold는 설정값으로 둔다.
+- 30분은 기본 예시값일 뿐이고, 사용자가 바꿀 수 있어야 한다.
+
+3. 조건이 좁을 때만 실행
+- 애매하면 실행하지 않는다.
+- false positive로 잘못 복귀시키는 것보다, stale jump를 조금 더 남겨두는 편이 낫다.
+
+4. 수동 해제 경로를 함께 둔다
+- 사용자는 자동 정리와 별개로, 현재 jump anchor를 명시적으로 버릴 수 있어야 한다.
+- 상태줄에서는 우클릭으로 anchor만 제거하는 경로를 제공하는 것이 가장 자연스럽다.
+
+권장 설정 형태
+{
+  "integration": {
+    "tmux": {
+      "jumpBack": {
+        "autoReturn": {
+          "enabled": false,
+          "afterIdleMin": 30
+        }
+      }
+    }
+  }
+}
+
+기본값
+- `enabled: false`
+- 이유:
+  - 한 화면만 쓰는 사용자에게는 자동 복귀가 간섭으로 느껴질 수 있다.
+  - 따라서 이 기능은 보편 기본값이 아니라 opt-in 기능이어야 한다.
+
+의미
+- `enabled`
+  - 자동 stale jump 정리를 켤지 여부
+- `afterIdleMin`
+  - jump target이 idle 상태로 이 시간 이상 유지되었을 때 auto-return 후보로 보는 기준
+
+자동 복귀 조건
+- 아래 조건이 모두 참일 때만 실행한다.
+
+1. 현재 client에 active jump anchor가 있다
+2. 현재 client 위치가 여전히 마지막 jump target과 같다
+3. jump target 세션이 idle 상태다
+4. jump target의 `idleSince`가 설정된 기준 시간 이상 유지되었다
+5. origin이 여전히 유효하다
+6. 현재 사용자가 그 client를 보고 있지 않다
+
+현재 구현의 실제 판정
+- 위 설계 의도는 유지하되, 현재 구현은 아래처럼 더 보수적으로 좁혀져 있다.
+1. auto-return이 설정으로 켜져 있다
+2. 현재 client에 active jump anchor가 있다
+3. 현재 client 위치가 anchor의 `lastJumpTarget*`와 정확히 일치한다
+4. jump target으로 식별되는 세션이 현재 snapshot에서 `sessionMatched === true` 이다
+5. 그 세션이 `pid-tree` 기준으로 실제 tmux pane에 붙어 있다
+6. 그 세션이 `status === "Idle"` 이다
+7. 그 세션의 `idleSince`가 threshold 이상이다
+8. tmux `client_activity`가 최근 30초 이내가 아니다
+
+즉, 현재 구현은 "현재 active client인지"를 직접 판단하지 않고, `client_activity` 기반의 좁은 근사치로만 막는다.
+이건 false positive를 줄이기 위한 보수적 구현이다.
+
+자동 복귀를 하지 않는 조건
+1. same-pane no-op jump였던 경우
+2. 사용자가 jump 이후 수동으로 다른 pane/window/session으로 이동한 경우
+3. jump target이 다시 active / thinking / tool / permission 상태가 된 경우
+4. origin pane/window/session이 더 이상 존재하지 않는 경우
+5. 현재 상태를 충분히 확신할 수 없는 경우
+6. 현재 client가 사용자에게 보이는 active client인 경우
+
+중요한 판정 기준
+1. "여전히 jump target에 머물러 있는가"
+- 이게 가장 중요하다.
+- 사용자가 jump 이후 다른 곳으로 이동했다면 auto-return을 하면 안 된다.
+- 따라서 origin뿐 아니라 마지막 jump target 식별자도 유지해야 한다.
+
+2. "충분히 오래 idle이었는가"
+- 기준은 `idleSince`
+- 단순 `lastActivityAt`보다 idle 진입 시각이 더 적합하다.
+- 1차 구현에서는 "그 사이 새 activity가 없었는가"를 별도 상태로 저장하지 않는다.
+- `idleSince >= threshold`와 현재 status가 idle이라는 두 조건으로 충분히 대표한다.
+
+정착 개념을 따로 두지 않는 이유
+- 처음에는 "정착" 개념으로 볼 수 있지만, 이 기능에 필요한 건 새로운 상태가 아니다.
+- 실제로 필요한 것은 아래 두 가지뿐이다.
+  1. 현재 client가 여전히 마지막 jump target 위에 있는가
+  2. 그 target이 충분히 오래 idle 상태였는가
+- 따라서 `settled` 같은 별도 상태를 저장하거나 전이시키지 않는다.
+- stale jump 판단은 필요할 때만 계산하는 파생 조건으로 둔다.
+
+왜 재방문 시점 auto-jump보다 background 정리가 더 나은가
+- 재방문 시점에 갑자기 화면이 바뀌면 blink처럼 느껴질 수 있다.
+- 사용자는 "무슨 일이 있었지?"를 한 번 더 생각하게 된다.
+- 반면 background에서 조용히 정리되면, 사용자는 그냥 원래 작업 흐름으로 이어갈 수 있다.
+
+즉시 auto-return과의 차이
+- 이 기능은 idle threshold가 넘는 순간 바로 이동시켜도 괜찮다.
+- 목표는 "나중에 다시 돌아왔을 때 stale target이 앞에 남아 있지 않게 하는 것"이기 때문이다.
+- 다만 구현 위치는 hot path가 아니라 background/maintenance 성격의 경로가 더 적합하다.
+- 단, 이 "즉시"는 사용자가 현재 그 client를 직접 보고 있지 않을 때만 허용한다.
+- 현재 active client에서 눈앞의 화면을 갑자기 바꾸는 것은 금지한다.
+
+구현에 필요한 최소 상태
+- 현재 anchor에는 origin 식별자가 이미 있다.
+- auto-return을 안전하게 하려면 아래를 추가로 기록해야 한다.
+  - `lastJumpTargetSessionId`
+  - `lastJumpTargetWindowId`
+  - `lastJumpTargetPaneId`
+- 필요하면 target의 `cwd`나 label은 진단/로그용으로만 둔다.
+
+이 상태가 필요한 이유
+- 현재 client가 여전히 jump target 위에 머무는지 확인하려면
+  target 식별자가 있어야 한다.
+- origin만으로는 auto-return 안전 조건을 만족시킬 수 없다.
+
+실행 위치 원칙
+- statusline hot path에 넣지 않는다.
+- 매 렌더마다 판단하는 기능이 되어서는 안 된다.
+- 더 적합한 위치:
+  - collector tick과 분리된 lightweight maintenance
+  - jump anchor housekeeping
+  - 또는 client 상태를 보는 좁은 관리 경로
+
+이유
+- 이 기능은 공용 snapshot 파생이 아니라 client 고유 상태 정리다.
+- 실시간 경로를 두껍게 만들 이유가 없다.
+
+현재 구현 위치
+- 현재 1차 구현은 별도 worker를 만들지 않고, collector tick이 snapshot과 statusline을 갱신한 직후 maintenance로 실행한다.
+- 이유:
+  - statusline hot path를 건드리지 않기 위해서
+  - 이미 collector tick이 최신 snapshot과 tmux snapshot을 확보하는 경계이기 때문이다
+  - 별도 background worker를 추가하는 것보다 side effect가 작기 때문이다
+- 이 선택은 최종 구조를 의미하지 않는다.
+- 나중에 필요하면 housekeeping 경로로 분리할 수 있지만, 현재는 collector tick 종료 시점이 가장 단순하고 안전한 위치다.
+
+연속성(continuity) 불확실성 처리
+- collector 재시작, snapshot discontinuity, idleSince 복원 실패 등으로 상태 연속성이 불확실할 수 있다.
+- 이 경우에는 auto-return을 하지 않는다.
+- 즉, 이 기능은 확신이 있을 때만 실행하고 애매하면 no-op으로 남긴다.
+
+실행 결과
+- 조건 충족 시 origin으로 복귀
+- 복귀 성공 시 anchor clear
+- 따라서 `↩`도 사라진다.
+
+수동 해제 UX
+- 자동 복귀와 별도로, 사용자가 현재 jump anchor를 직접 제거할 수 있어야 한다.
+- 가장 자연스러운 UX:
+  - 좌클릭 `↩` 또는 origin 항목 -> `jump-back`
+  - 우클릭 `↩` 또는 origin 항목 -> anchor clear만 수행
+- 우클릭은 이동이 아니라 상태 제거만 담당한다.
+- 즉 "이제 back은 필요 없다"를 사용자가 직접 선언하는 경로다.
+- 다만 우클릭은 tmux / 터미널 앱 조합에 따라 컨텍스트 메뉴에 먼저 소비될 수 있다.
+- 따라서 우클릭 clear는 best-effort UX로 본다.
+- 필요하면 나중에 별도 키보드 clear 명령을 fallback으로 추가할 수 있다.
+
+현재 구현 상태
+- 이 수동 해제 UX는 아직 구현하지 않았다.
+- 현재는 기존 `jump-back`만 있고, auto-return과 별개로 anchor만 clear하는 수동 경로는 후속 작업이다.
+
+실패 처리
+- 복귀 실패 시 조용히 no-op
+- anchor는 상황에 따라 유지 또는 clear
+- 원칙:
+  - origin이 완전히 무효하면 clear
+  - 일시적 실패면 유지
+
+주의할 점
+1. 사용자가 현재 stale jump target을 의도적으로 남겨둔 경우일 수 있다
+- 그래서 opt-in이 맞다.
+
+2. 너무 짧은 threshold는 과민하다
+- 30분은 출발점으로 괜찮다.
+- 5분, 10분은 과도할 가능성이 크다.
+
+3. activity 판정이 애매하면 실행하지 않는 편이 낫다
+- false positive auto-return이 가장 위험하다.
+
+4. 현재 보이는 client를 자동으로 바꾸면 안 된다
+- blink 없는 정리가 목적이므로, 사용자가 현재 보고 있는 client에서는 auto-return을 실행하지 않는다.
+
+테스트 시나리오
+1. idle threshold 미만이면 auto-return 없음
+2. idle threshold 이상 + 여전히 jump target 위면 auto-return 실행
+3. jump 이후 수동 이동이 있었으면 auto-return 없음
+4. target이 다시 active가 되면 auto-return 없음
+5. origin 무효면 auto-return 실패 후 anchor 정리
+6. same-pane no-op은 auto-return 후보가 되지 않음
+7. 현재 active client에서는 auto-return 없음
+8. continuity 불확실 시 auto-return 없음
+9. 다른 client anchor에는 영향 없음
+
+현재 1차 구현에서 실제로 고정한 테스트
+1. idle threshold 미만이면 auto-return 없음
+2. idle threshold 이상 + 여전히 jump target 위면 auto-return 실행
+3. jump 이후 수동 이동이 있었으면 auto-return 없음
+4. 최근 client activity가 있으면 auto-return 없음
+5. origin 무효면 auto-return 실패 후 anchor 정리
+6. jump anchor가 마지막 jump target 식별자를 저장함
+7. 설정 기본값과 config merge가 유지됨
+8. CLI 설정 샘플/도움말에 설정 경로가 노출됨
+
+남은 제한 / 메타 메모
+- 현재 구현은 `current active client`를 완전하게 알지 못한다.
+- 대신 `client_activity` 기반의 30초 grace로 보수적으로 막는다.
+- 이 때문에 아래 두 경우는 남는다.
+  1. 실제로는 보고 있지 않지만 최근 activity가 있어 no-op이 되는 false negative
+  2. 아주 드물게 active 여부를 충분히 대표하지 못하는 tmux 환경 차이
+- 그러나 현재 기준에서는 "잘못 자동 복귀"보다 "조금 덜 자동 복귀"가 낫기 때문에 이 선택이 맞다.
+
+메타 결론
+- 이 기능은 "자동 이동"이라기보다, 오래된 jump 문맥을 정리해서 원래 작업 흐름을 복원하는 기능이다.
+- 따라서 기본값은 off, threshold는 설정 가능, 판단은 보수적으로 가는 것이 맞다.
+- 핵심은 재방문 시 blink를 만들지 않는 것이다.

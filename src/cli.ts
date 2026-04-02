@@ -170,12 +170,13 @@ function buildHelpAppendix(): string {
     `Config location: ${getConfigDir()}/settings.json`,
     "Common settings:",
     "  display.attentionLimit / display.statuslineAttentionLimit",
-    "  integration.tmux.badgeStyle / integration.tmux.keys.*",
+    "  integration.tmux.badgeStyle / integration.tmux.keys.* / integration.tmux.jumpBack.*",
     "  paths.* (runtime data path overrides)",
     "",
     "Shortcuts can be customized in settings.json:",
     '  integration.tmux.badgeStyle = "plain" | "minimal" | "pill"',
     "  integration.tmux.keys = { attentionPopup, jumpPopup, dockToggle, directJump[] }",
+    "  integration.tmux.jumpBack.autoReturn = { enabled, afterIdleMin }",
   ].join("\n");
 }
 
@@ -403,6 +404,12 @@ function buildMinimalConfigSample(): string {
             dockToggle: "m",
             directJump: ["M-1", "M-2", "M-3", "M-4", "M-5"],
           },
+          jumpBack: {
+            autoReturn: {
+              enabled: false,
+              afterIdleMin: 30,
+            },
+          },
         },
       },
     },
@@ -439,6 +446,12 @@ function buildAdvancedConfigSample(): string {
             jumpPopup: "j",
             dockToggle: "m",
             directJump: ["M-1", "M-2", "M-3", "M-4", "M-5"],
+          },
+          jumpBack: {
+            autoReturn: {
+              enabled: false,
+              afterIdleMin: 30,
+            },
           },
         },
         wezterm: {

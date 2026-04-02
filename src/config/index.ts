@@ -72,6 +72,12 @@ export interface MarmonitorConfig {
         dockToggle: string;
         directJump: string[];
       };
+      jumpBack: {
+        autoReturn: {
+          enabled: boolean;
+          afterIdleMin: number;
+        };
+      };
     };
     wezterm: {
       enabled: boolean;
@@ -152,6 +158,12 @@ const DEFAULTS: MarmonitorConfig = {
         jumpPopup: "j",
         dockToggle: "m",
         directJump: ["M-1", "M-2", "M-3", "M-4", "M-5"],
+      },
+      jumpBack: {
+        autoReturn: {
+          enabled: false,
+          afterIdleMin: 30,
+        },
       },
     },
     wezterm: {

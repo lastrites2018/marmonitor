@@ -53,6 +53,7 @@ async function resolveOriginCwd(
 
 async function buildJumpAnchor(
   location: TmuxClientLocation,
+  target: TmuxJumpTarget,
   deps: JumpNavigationDeps = {},
 ): Promise<TmuxJumpAnchor> {
   const now = Date.now();
@@ -63,6 +64,9 @@ async function buildJumpAnchor(
     originWindowId: location.windowId,
     originPaneId: location.paneId,
     originCwd: await resolveOriginCwd(location, deps.listTmuxPanes),
+    lastJumpTargetSessionId: target.pane.sessionId,
+    lastJumpTargetWindowId: target.pane.windowId,
+    lastJumpTargetPaneId: target.pane.paneId,
     recordedAt: now,
     lastJumpedAt: now,
   };
@@ -87,10 +91,13 @@ function buildJumpBriefing(
   };
 }
 
-function touchJumpAnchor(anchor: TmuxJumpAnchor): TmuxJumpAnchor {
+function touchJumpAnchor(anchor: TmuxJumpAnchor, target: TmuxJumpTarget): TmuxJumpAnchor {
   const now = Date.now();
   return {
     ...anchor,
+    lastJumpTargetSessionId: target.pane.sessionId,
+    lastJumpTargetWindowId: target.pane.windowId,
+    lastJumpTargetPaneId: target.pane.paneId,
     lastJumpedAt: now,
   };
 }
@@ -194,8 +201,8 @@ export async function jumpToAgentWithAnchor(
   }
 
   const anchor = existingAnchor
-    ? touchJumpAnchor(existingAnchor)
-    : await buildJumpAnchor(origin, deps);
+    ? touchJumpAnchor(existingAnchor, target)
+    : await buildJumpAnchor(origin, target, deps);
   await persistAnchor(anchor);
   if (options.briefingSource) {
     await persistBriefing(buildJumpBriefing(origin, agent, options.briefingSource));
