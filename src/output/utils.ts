@@ -289,7 +289,6 @@ export interface AttentionBuildOptions {
 
 const DEFAULT_PHASE_ATTENTION_MAX_AGE_SEC = 15 * 60;
 const DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC = 10 * 60;
-const DEFAULT_STATUSLINE_PHASE_CHANGE_HIGHLIGHT_SEC = 20;
 const DEFAULT_WARM_IDLE_MIN_AGE_SEC = 10 * 60 + 1;
 const DEFAULT_WARM_IDLE_MAX_AGE_SEC = 60 * 60 - 1;
 const DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC = 2 * 60;
@@ -297,7 +296,6 @@ const DEFAULT_PERSISTENT_UNMATCHED_GRACE_SEC = 2 * 60;
 export interface StatuslineAttentionOptions {
   nowSec?: number;
   recentCompleteMaxAgeSec?: number;
-  phaseChangeHighlightWindowSec?: number;
   suppressedRepoLabels?: Set<string>;
 }
 
@@ -656,15 +654,6 @@ function isRecentCompleteSession(
   return Math.max(0, nowSec - agent.recentCompleteAt) <= recentCompleteMaxAgeSec;
 }
 
-function isRecentlyHighlightedActivity(
-  at: number | undefined,
-  nowSec: number,
-  highlightWindowSec: number,
-): boolean {
-  if (!at) return false;
-  return Math.max(0, nowSec - at) <= highlightWindowSec;
-}
-
 export function isIdleRightRailCandidate(
   agent: AgentSession,
   options: { nowSec?: number } = {},
@@ -1018,8 +1007,6 @@ function isRecentCompleteAttention(
 function collapseStatuslineAttentionDuplicates(
   items: AttentionItem[],
   maxLabelLength: number,
-  nowSec: number,
-  highlightWindowSec: number,
 ): StatuslineAttentionRepresentative[] {
   const grouped = new Map<string, AttentionItem[]>();
   for (const item of items) {
@@ -1051,11 +1038,7 @@ function collapseStatuslineAttentionDuplicates(
         status: representative.status,
         phase: representative.phase,
         recentComplete: true,
-        highlighted: isRecentlyHighlightedActivity(
-          representative.recentCompleteAt,
-          nowSec,
-          highlightWindowSec,
-        ),
+        highlighted: false,
       } satisfies StatuslineAttentionRepresentative;
     })
     .sort((a, b) => {
@@ -1082,8 +1065,6 @@ function compareImmediateDuplicateCandidates(a: AttentionItem, b: AttentionItem)
 function collapseImmediateStatuslineDuplicates(
   items: AttentionItem[],
   maxLabelLength: number,
-  nowSec: number,
-  highlightWindowSec: number,
 ): StatuslineAttentionRepresentative[] {
   const grouped = new Map<string, AttentionItem[]>();
   for (const item of items) {
@@ -1116,11 +1097,7 @@ function collapseImmediateStatuslineDuplicates(
         status: representative.status,
         phase: representative.phase,
         recentComplete: false,
-        highlighted: isRecentlyHighlightedActivity(
-          attentionActivityTime(representative),
-          nowSec,
-          highlightWindowSec,
-        ),
+        highlighted: representative.kind === "permission",
       } satisfies StatuslineAttentionRepresentative;
     })
     .sort((a, b) => {
@@ -1142,8 +1119,6 @@ export function buildStatuslineAttentionRepresentatives(
   const nowSec = options.nowSec ?? Date.now() / 1000;
   const recentCompleteMaxAgeSec =
     options.recentCompleteMaxAgeSec ?? DEFAULT_RECENT_COMPLETE_MAX_AGE_SEC;
-  const highlightWindowSec =
-    options.phaseChangeHighlightWindowSec ?? DEFAULT_STATUSLINE_PHASE_CHANGE_HIGHLIGHT_SEC;
   const suppressedRepoLabels = options.suppressedRepoLabels ?? new Set<string>();
   const layout = resolveStatuslineDetailLayout(width, maxCount);
 
@@ -1152,8 +1127,6 @@ export function buildStatuslineAttentionRepresentatives(
       (item) => item.kind === "permission" || item.kind === "thinking" || item.kind === "tool",
     ),
     layout.pathMaxLength,
-    nowSec,
-    highlightWindowSec,
   );
 
   const recentComplete = collapseStatuslineAttentionDuplicates(
@@ -1163,8 +1136,6 @@ export function buildStatuslineAttentionRepresentatives(
         !suppressedRepoLabels.has(statuslineRepoLabel(item.cwd)),
     ),
     layout.pathMaxLength,
-    nowSec,
-    highlightWindowSec,
   );
 
   const recentCompleteReserve = recentComplete.length > 0 ? 1 : 0;

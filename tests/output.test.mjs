@@ -335,7 +335,7 @@ describe("renderStatusline idle right rail", () => {
       },
     );
 
-    assert.match(text, /#\[range=user\|pid:42]#\[bold]1 🤔Cl marmonitor \ds#\[nobold]#\[norange]/);
+    assert.match(text, /#\[range=user\|pid:42]1 🤔Cl marmonitor \ds#\[norange]/);
     assert.doesNotMatch(text, /vos-in-app-dashboard-frontend/);
   });
 

@@ -1914,14 +1914,24 @@ describe("statusline attention projection", () => {
     );
     assert.match(
       buildTmuxStatuslineAttentionPills(items, 5, 200, "plain", { nowSec: now }) ?? "",
-      /#\[range=user\|pid:30]#\[bold]1 ⏳Cl marmonitor allow#\[nobold]#\[norange] {2}#\[range=user\|pid:31]#\[bold]2 ✅Cx roam-new \+1 20s#\[nobold]#\[norange]/,
+      /#\[range=user\|pid:30]#\[bold]1 ⏳Cl marmonitor allow#\[nobold]#\[norange] {2}#\[range=user\|pid:31]2 ✅Cx roam-new \+1 20s#\[norange]/,
     );
   });
 
-  it("marks very recent phase transitions for short tmux emphasis", () => {
+  it("keeps only permission items highlighted in tmux statusline attention", () => {
     const now = Math.floor(Date.now() / 1000);
     const representatives = buildStatuslineAttentionRepresentatives(
       [
+        {
+          kind: "permission",
+          priority: 0,
+          pid: 89,
+          agentName: "Claude Code",
+          cwd: "/repo/marmonitor",
+          status: "Active",
+          phase: "permission",
+          lastActivityAt: now - 40,
+        },
         {
           kind: "thinking",
           priority: 1,
@@ -1946,19 +1956,30 @@ describe("statusline attention projection", () => {
       ],
       5,
       200,
-      { nowSec: now, phaseChangeHighlightWindowSec: 20 },
+      { nowSec: now },
     );
 
     assert.deepEqual(
       representatives.map((item) => [item.pid, item.highlighted]),
       [
-        [90, true],
+        [89, true],
+        [90, false],
         [91, false],
       ],
     );
     assert.match(
       buildTmuxStatuslineAttentionPills(
         [
+          {
+            kind: "permission",
+            priority: 0,
+            pid: 89,
+            agentName: "Claude Code",
+            cwd: "/repo/marmonitor",
+            status: "Active",
+            phase: "permission",
+            lastActivityAt: now - 40,
+          },
           {
             kind: "thinking",
             priority: 1,
@@ -1973,9 +1994,9 @@ describe("statusline attention projection", () => {
         5,
         200,
         "plain",
-        { nowSec: now, phaseChangeHighlightWindowSec: 20 },
+        { nowSec: now },
       ) ?? "",
-      /#\[range=user\|pid:90]#\[bold]1 🤔Cx marmonitor 5s#\[nobold]#\[norange]/,
+      /#\[range=user\|pid:89]#\[bold]1 ⏳Cl marmonitor allow#\[nobold]#\[norange] {2}#\[range=user\|pid:90]2 🤔Cx marmonitor 5s#\[norange]/,
     );
   });
 
