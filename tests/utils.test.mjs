@@ -1605,7 +1605,6 @@ describe("statusline attention projection", () => {
         ["thinking", 71, "think-a"],
         ["tool", 72, "tool-a"],
         ["active", 73, "current-session"],
-        ["active", 74, "second-session"],
       ],
     );
   });
@@ -1704,10 +1703,7 @@ describe("statusline attention projection", () => {
 
     assert.deepEqual(
       representatives.map((item) => [item.kind, item.pid, item.label]),
-      [
-        ["active", 60, "current-session"],
-        ["active", 61, "second-session"],
-      ],
+      [["active", 60, "current-session"]],
     );
   });
 
@@ -2016,10 +2012,7 @@ describe("statusline attention projection", () => {
 
     assert.deepEqual(
       representatives.map((item) => [item.pid, item.recentComplete]),
-      [
-        [51, true],
-        [50, false],
-      ],
+      [[51, true]],
     );
     assert.equal(
       buildStatuslineAttentionFocusText(
@@ -2050,7 +2043,7 @@ describe("statusline attention projection", () => {
         200,
         { nowSec: now },
       ),
-      "✅Cx recent-complete 20s │ ✓Cl done-only 40s",
+      "✅Cx recent-complete 20s",
     );
     assert.equal(
       buildAttentionFocusText(
@@ -2070,6 +2063,26 @@ describe("statusline attention projection", () => {
         200,
       ),
       "✓Cl done-only 40s",
+    );
+    assert.equal(
+      buildStatuslineAttentionFocusText(
+        [
+          {
+            kind: "active",
+            priority: 2,
+            pid: 50,
+            agentName: "Claude Code",
+            cwd: "/repo/done-only",
+            status: "Idle",
+            phase: "done",
+            lastActivityAt: now - 40,
+          },
+        ],
+        5,
+        200,
+        { nowSec: now },
+      ),
+      undefined,
     );
     assert.match(
       buildTmuxAttentionPills(

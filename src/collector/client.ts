@@ -159,6 +159,10 @@ export async function readCollectorStatuslineForRequest(params: {
       freshness: "current",
     };
   }
+  const snapshot = await readCollectorSnapshot(Number.MAX_SAFE_INTEGER, params.root);
+  if (isCollectorArtifactCurrent(snapshot, health?.value)) {
+    return undefined;
+  }
   if (canServeStaleStatusline(statusline.ageMs, currentStatuslineTtlMs)) {
     return {
       value: statusline.value,

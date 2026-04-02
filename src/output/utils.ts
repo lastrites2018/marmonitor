@@ -1179,6 +1179,7 @@ export function buildStatuslineAttentionRepresentatives(
     .filter(
       (item): item is AttentionItem & { kind: "active" } =>
         item.kind === "active" &&
+        item.status === "Active" &&
         !selectedPids.has(item.pid) &&
         !selectedRepoKeys.has(statuslineRepoLabel(item.cwd)) &&
         !suppressedRepoLabels.has(statuslineRepoLabel(item.cwd)),

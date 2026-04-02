@@ -469,6 +469,73 @@ describe("statusline client", () => {
     assert.equal(widthStatusline?.value, stdout.trim());
   });
 
+  it("does not serve a stale width-specific statusline when a newer current snapshot exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-width-current-snapshot-"));
+    const statuslineAttentionLimit = getDefaults().display.statuslineAttentionLimit;
+    const now = Date.now();
+    await writeCollectorStatusline("tmux-badges", statuslineAttentionLimit, 328, "AI:0", root);
+    const staleButServeableSec = (now - 5_000) / 1000;
+    await utimes(
+      collectorStatuslineFile("tmux-badges", statuslineAttentionLimit, 328, root),
+      staleButServeableSec,
+      staleButServeableSec,
+    );
+    await writeCollectorHealth(
+      {
+        pid: 6666,
+        startedAt: now,
+        lastTickAt: now,
+        lastSuccessAt: now,
+        snapshotGeneratedAt: now,
+        state: "idle",
+        version: "test",
+        snapshotTtlMs: 10_000,
+        statuslineTtlMs: 10_000,
+        statuslineAttentionLimit,
+      },
+      root,
+    );
+    await writeCollectorSnapshot(
+      [
+        {
+          pid: 1,
+          agentName: "Codex",
+          cwd: "/repo/current-work",
+          status: "Active",
+          phase: "thinking",
+          runtimeSource: "cli",
+        },
+      ],
+      root,
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [statuslineBinPath, "--statusline", "--statusline-format", "tmux-badges", "--width", "328"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TMPDIR: root,
+          HOME: root,
+          MARMONITOR_CLAUDE_HOME: join(root, ".claude"),
+          MARMONITOR_CODEX_HOME: join(root, ".codex"),
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.notEqual(stdout.trim(), "AI:0");
+    const widthStatusline = await readCollectorStatusline(
+      "tmux-badges",
+      statuslineAttentionLimit,
+      328,
+      10_000,
+      root,
+    );
+    assert.equal(widthStatusline?.value, stdout.trim());
+  });
+
   it("underlines the origin session when it is visible in the current tmux statusline", async () => {
     const root = await mkdtemp(join(tmpdir(), "marmonitor-statusline-origin-highlight-"));
     const requestedConfigPath = "/tmp/nonexistent-settings.json";
