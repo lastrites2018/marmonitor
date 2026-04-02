@@ -1,0 +1,73 @@
+세션 개요
+
+이번 세션의 핵심은 `vos-in-app-dashboard-frontend`가 현재 작업처럼 잘못 보이던 원인을 끝까지 좁혀서, `동일 cwd의 동시 Codex 프로세스가 같은 rollout/session으로 잘못 붙는 문제`로 확정한 뒤 수정한 것이다. 최종 수정은 `fix: disambiguate concurrent Codex sessions by process start time` 커밋으로 남겼다.
+
+명확해진 점
+
+1. 이번 문제의 본질은 statusline 표현 자체가 아니라 `Codex 프로세스 -> rollout/session 매칭` 계층에 있었다.
+- 초기에는 `unmatched suppression`, `cwd fallback`, `stale width artifact`, `recent-complete 정책`처럼 보였지만, 실제 핵심은 서로 다른 두 Codex 프로세스가 같은 최신 session으로 수렴하고 있었다는 점이다.
+- 즉 left rail이 틀린 대표를 고른 이유는 표현 계층만의 문제가 아니라, 그 위에 올라오는 공용 상태가 이미 잘못되어 있었기 때문이다.
+
+2. 동일 cwd에 Codex 프로세스가 여러 개 뜨는 경우, 프로세스별로 독립적으로 "가장 그럴듯한 최신 rollout"을 고르면 안 된다.
+- 기존 방식은 각 프로세스가 개별적으로 `selectCodexSession()`을 호출했다.
+- 이 방식은 같은 cwd에 동시 실행이 있을 때 둘 다 최신 rollout으로 붙기 쉽다.
+- 이 경우 statusline에서는 "현재 작업 중인 세션"처럼 잘못 보이고, 클릭도 실제 의도와 다른 pane으로 간다.
+
+3. 이 종류의 문제는 `sessionMatched`, `tmux match`, `statusline projection`을 분리해서 봐야 한다.
+- `tmux jump`가 맞는지
+- session/rollout 매칭이 맞는지
+- 그 위 표현이 맞는지
+를 한 번에 섞어 보면 원인을 계속 잘못 짚게 된다.
+
+잘 작동한 접근
+
+1. 상태줄 문자열만 보지 않고, 아래 세 가지를 같이 본 것이 결정적이었다.
+- `status --json`의 `pid / cwd / sessionId / phase / status`
+- `jump --pid --json`의 tmux match 근거
+- `ps`의 실제 프로세스 시작 시각
+
+2. "지금 잘못 보이는 pid가 정말 살아 있는가"와 "그 pid가 어떤 sessionId에 붙어 있는가"를 분리해서 본 것이 유효했다.
+- 이전 세션들에서는 dead process, stale cache, unmatched suppression 쪽으로 먼저 흘렀다.
+- 이번에는 살아 있는 pid 두 개가 같은 `sessionId`를 공유하고 있다는 사실이 핵심 증거였다.
+
+3. 최종 수정은 render 단계 꼼수가 아니라 scanner 계층의 공용 상태를 바로잡는 쪽으로 가는 게 맞았다.
+- statusline에서 다시 tmux를 더 읽거나, 특정 repo를 숨기는 정책으로 덮는 것은 근본 해결이 아니었다.
+- 동일 cwd 동시 프로세스를 1:1로 session에 배정하는 것이 맞는 수정이었다.
+
+기대와 다르게 흘러간 지점에서 배운 점
+
+1. `cwd fallback이 너무 느슨하다`는 진단은 일부 현상은 설명했지만 최종 원인은 아니었다.
+- 실제로는 `jump --pid 78817 --json`이 `pid-tree`를 반환했고, tmux match 자체는 맞는 쪽이었다.
+- 문제는 그 pid가 왜 "현재 작업" session으로 보이느냐였고, 그건 session 매칭 계층 문제였다.
+
+2. `unmatched current work가 있으면 matched idle/done을 suppress`하는 규칙은 증상을 줄일 수는 있어도, 잘못 붙은 session 자체는 못 고친다.
+- 이 규칙은 여전히 별도 정책으로 의미가 있을 수 있다.
+- 하지만 이번 사례에서는 근본 원인보다 한 단계 위에서만 작동하는 임시 방편이었다.
+
+3. 동일 repo/cwd 문제는 생각보다 자주 "정책 문제"처럼 보이지만, 실제로는 "identity 문제"인 경우가 있다.
+- 이번에는 어떤 세션을 보여줄지보다, 어떤 프로세스가 어떤 rollout에 속하는지가 먼저였다.
+
+열린 질문
+
+1. 오른쪽 warm idle rail 정책은 아직 별도 판단이 필요하다.
+- 현재 수정으로 left rail의 잘못된 current-work 대표는 사라졌다.
+- 하지만 같은 repo에 unmatched current work가 다른 곳에 있어도, matched idle 세션은 warm idle rail에 남을 수 있다.
+- 이건 correctness bug라기보다 제품 정책 문제로 분리해서 다루는 게 맞다.
+
+2. Claude/Codex/Gemini 전체에 대해 "동일 cwd 동시 프로세스"를 일반 규칙으로 승격할지 여부는 아직 열려 있다.
+- 현재 수정은 Codex에 직접 맞춘 형태다.
+- 다른 runtime까지 일반화할지는 별도 사례와 비용을 보고 판단해야 한다.
+
+다음 세션 재시작 가이드
+
+1. 비슷한 "현재 작업이 아닌데 current work처럼 보임" 이슈가 다시 나오면, 먼저 아래 세 축을 순서대로 본다.
+- `jump --pid --json`으로 tmux match 근거 확인
+- `status --json`에서 해당 pid들의 `sessionId`가 서로 겹치는지 확인
+- `ps`로 각 pid의 실제 시작 시각 확인
+
+2. 같은 cwd의 동시 Codex 프로세스가 있으면, 먼저 "여러 pid가 같은 최신 sessionId에 붙었는가"를 본다.
+- 이게 보이면 표현 계층이 아니라 session assignment 계층 이슈일 가능성이 높다.
+
+3. 다음에 추가로 손댈 수 있는 건 policy 쪽이다.
+- 같은 repo에 unmatched current work가 있을 때 warm idle rail까지 suppress할지
+- 이건 correctness가 아니라 UX/정보 정책 문제로 따로 다룰 것
