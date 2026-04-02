@@ -24,6 +24,11 @@
 >
 > The README below describes the current behavior of this fork. Some tmux interactions documented here go beyond the stock upstream plugin defaults and reflect a personal local setup built on top of the original project's binaries and ideas.
 
+### Fork maintenance status
+
+- This fork currently does not include GitHub Action workflow templates for CI or npm publish.
+- If you need CI/release automation, add your own workflow files under `.github/workflows`.
+
 ## Why marmonitor?
 
 Running multiple AI coding agents in tmux is now the norm — Claude Code refactoring your backend, Codex writing tests in another pane, Gemini reviewing docs in a third. But as sessions multiply, you hit the same wall:
