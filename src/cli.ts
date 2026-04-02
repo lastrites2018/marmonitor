@@ -690,7 +690,9 @@ program
         console.error(`AI session not found for pid ${item.pid}.`);
         process.exit(1);
       }
-      const result = await jumpToAgentWithAnchor(agent);
+      const result = await jumpToAgentWithAnchor(agent, {
+        briefingSource: "keyboard",
+      });
       printJumpResult(result);
       if (!result.found) process.exit(1);
       return;
