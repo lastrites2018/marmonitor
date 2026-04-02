@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { MarmonitorConfig } from "../config/index.js";
 import { resolveRuntimeDataPaths } from "../config/index.js";
 import { profileAsync } from "../perf.js";
-import type { AgentSession, SessionPhase, TokenUsage } from "../types.js";
+import type { AgentSession, SessionPhase, TokenUsage, UnmatchedReason } from "../types.js";
 
 // ─── Re-exports (public API) ──────────────────────────────────────
 
@@ -48,6 +48,7 @@ import {
 } from "./runtime-snapshot.js";
 import { detectCliStdoutPhase, determineStatus } from "./status.js";
 import { deriveSessionTransitionState } from "./transitions.js";
+import { deriveUnmatchedReason } from "./unmatched.js";
 
 import type { ScanOptions } from "./types.js";
 
@@ -145,7 +146,10 @@ export async function scanAgents(
     let lastActivityAt: number | undefined;
     let idleSince: number | undefined;
     let recentCompleteAt: number | undefined;
+    let unmatchedReason: UnmatchedReason | undefined;
     let codexSessionFile: string | undefined;
+    let sessionLookupAttempted = false;
+    let ambiguousMatch = false;
     const runtimeSource = detectRuntimeSource(agentName, proc.cmd);
     const cacheKey = `${agentName}:${proc.pid}`;
     const cachedEnrichment = sessionEnrichmentCache.get(cacheKey);
@@ -164,6 +168,7 @@ export async function scanAgents(
       lastActivityAt = cachedEnrichment.lastActivityAt;
       idleSince = cachedEnrichment.idleSince;
       recentCompleteAt = cachedEnrichment.recentCompleteAt;
+      unmatchedReason = cachedEnrichment.unmatchedReason;
     } else if (agentName === "Claude Code") {
       let processCwd =
         seededSession?.cwd && seededSession.cwd !== "unknown" ? seededSession.cwd : undefined;
@@ -189,6 +194,7 @@ export async function scanAgents(
           includeTokenUsage,
           runtimePaths,
         });
+        sessionLookupAttempted = true;
       }
       if (!claudeData.sessionMatched) {
         processCwd ??= (await getProcessCwd(proc.pid)) ?? undefined;
@@ -204,6 +210,7 @@ export async function scanAgents(
             cwd: processCwd,
             processStartedAt: processStartTime,
           });
+          sessionLookupAttempted = true;
         }
       }
       if (claudeData.cwd) cwd = claudeData.cwd;
@@ -238,6 +245,7 @@ export async function scanAgents(
       if (!matched && cwdMatches.length === 1) {
         matched = cwdMatches[0];
       } else if (!matched && cwdMatches.length > 1) {
+        ambiguousMatch = true;
         const processStartTime = await getProcessStartTime(proc.pid, {
           sharedKey: `${proc.pid}:${proc.ppid}:${proc.name}:${proc.cmd ?? ""}`,
         });
@@ -246,8 +254,10 @@ export async function scanAgents(
           matched = cwdMatches.find((session) => session.id === seededSession.sessionId);
         }
       }
+      sessionLookupAttempted = cwd !== "unknown";
       if (matched) {
         sessionMatched = true;
+        ambiguousMatch = false;
         sessionId = matched.id;
         startedAt = matched.timestamp;
         lastActivityAt = matched.lastActivityAt;
@@ -275,6 +285,7 @@ export async function scanAgents(
       const geminiData = await parseGeminiSession(cwd, {
         includeTokenUsage,
       });
+      sessionLookupAttempted = cwd !== "unknown";
       startedAt =
         geminiData.startedAt ??
         seededSession?.startedAt ??
@@ -301,6 +312,14 @@ export async function scanAgents(
     const statusBaseAt = lastActivityAt ?? lastResponseAt ?? startedAt;
     const elapsed = statusBaseAt ? Date.now() / 1000 - statusBaseAt : undefined;
     const status = determineStatus(cpuPercent, elapsed, sessionMatched, phase, config);
+    if (status === "Unmatched") {
+      unmatchedReason = deriveUnmatchedReason({
+        cwd,
+        startedAt,
+        sessionLookupAttempted,
+        ambiguousMatch,
+      });
+    }
     const transitionState = deriveSessionTransitionState(
       {
         status,
@@ -333,6 +352,7 @@ export async function scanAgents(
       runtimeSource,
       idleSince,
       recentCompleteAt,
+      unmatchedReason,
     } as AgentSession;
 
     if (isFullEnrichment) {
@@ -349,6 +369,7 @@ export async function scanAgents(
         runtimeSource: session.runtimeSource,
         idleSince: session.idleSince,
         recentCompleteAt: session.recentCompleteAt,
+        unmatchedReason: session.unmatchedReason,
       });
     }
 

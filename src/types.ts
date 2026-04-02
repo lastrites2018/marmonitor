@@ -10,6 +10,16 @@ export interface TokenUsage {
 /** Agent session status */
 export type SessionStatus = "Active" | "Idle" | "Stalled" | "Unmatched" | "Dead";
 
+/** Why a visible agent process could not be matched to a session */
+export type UnmatchedReason =
+  | "startup_grace"
+  | "session_file_missing"
+  | "cwd_unknown"
+  | "ambiguous_match"
+  | "session_metadata_unavailable"
+  | "unsupported_runtime"
+  | "unknown";
+
 /** Agent activity phase (what the AI is doing right now) */
 export type SessionPhase = "thinking" | "tool" | "permission" | "done" | undefined;
 
@@ -46,6 +56,7 @@ export interface AgentSession {
   runtimeSource?: RuntimeSource;
   idleSince?: number; // epoch seconds — when the session entered Idle
   recentCompleteAt?: number; // epoch seconds — recent thinking/tool -> idle transition
+  unmatchedReason?: UnmatchedReason; // diagnostics-only reason for unresolved session matching
 }
 
 /** Agent detection signature */

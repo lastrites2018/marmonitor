@@ -7,6 +7,7 @@ import type {
   SessionPhase,
   SystemInfo,
   TokenUsage,
+  UnmatchedReason,
   WorkerProcess,
 } from "../types.js";
 import { renderUnavailableStatusline } from "./unavailable.js";
@@ -127,6 +128,27 @@ function runtimeLabel(source?: AgentSession["runtimeSource"]): string {
   }
 }
 
+function unmatchedReasonLabel(reason?: UnmatchedReason): string | undefined {
+  switch (reason) {
+    case "startup_grace":
+      return "starting up";
+    case "session_file_missing":
+      return "session file missing";
+    case "cwd_unknown":
+      return "cwd unavailable";
+    case "ambiguous_match":
+      return "multiple candidates";
+    case "session_metadata_unavailable":
+      return "metadata unavailable";
+    case "unsupported_runtime":
+      return "runtime unsupported";
+    case "unknown":
+      return "reason unknown";
+    default:
+      return undefined;
+  }
+}
+
 /** Format token usage as a compact string */
 function formatTokenUsage(t?: TokenUsage, model?: string): string {
   if (!t) return "";
@@ -205,8 +227,10 @@ export async function printStatus(agents: AgentSession[]): Promise<void> {
     );
     for (const a of unmatched) {
       const agent = agentLabel(a.agentName);
+      const path = shortenPath(a.cwd);
+      const reason = unmatchedReasonLabel(a.unmatchedReason);
       console.log(
-        `  ${chalk.magenta("[Unmatched]")}  ${agent}  PID:${a.pid}  MEM:${a.memoryMb.toFixed(0)}MB${runtimeLabel(a.runtimeSource)}  ${chalk.dim(`kill ${a.pid}`)}`,
+        `  ${chalk.magenta("[Unmatched]")}  ${agent}  PID:${a.pid}  MEM:${a.memoryMb.toFixed(0)}MB${runtimeLabel(a.runtimeSource)}  ${path}${reason ? `  reason: ${reason}` : ""}  ${chalk.dim(`kill ${a.pid}`)}`,
       );
     }
   }
@@ -245,8 +269,9 @@ export function printCleanPlan(agents: AgentSession[], kill: boolean): void {
 
   for (const agent of agents) {
     const label = agentLabel(agent.agentName);
+    const reason = unmatchedReasonLabel(agent.unmatchedReason);
     console.log(
-      `  ${label} PID:${agent.pid}  MEM:${agent.memoryMb.toFixed(0)}MB${runtimeLabel(agent.runtimeSource)}  ${shortenPath(agent.cwd)}`,
+      `  ${label} PID:${agent.pid}  MEM:${agent.memoryMb.toFixed(0)}MB${runtimeLabel(agent.runtimeSource)}  ${shortenPath(agent.cwd)}${reason ? `  reason: ${reason}` : ""}`,
     );
   }
 }
@@ -268,6 +293,7 @@ export function printCleanJson(
           cwd: agent.cwd,
           runtimeSource: agent.runtimeSource,
           memoryMb: agent.memoryMb,
+          unmatchedReason: agent.unmatchedReason,
         })),
       },
       null,

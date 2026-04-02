@@ -1,10 +1,27 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  printCleanJson,
+  printCleanPlan,
+  printStatus,
   renderStatusline,
   renderUnavailableStatusline,
   requiresSystemInfoForStatusline,
 } from "../dist/output/index.js";
+
+async function captureConsoleLogs(fn) {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    lines.push(args.join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.log = originalLog;
+  }
+  return lines.join("\n");
+}
 
 describe("renderUnavailableStatusline", () => {
   it("returns plain fallback for default formats", () => {
@@ -17,6 +34,72 @@ describe("renderUnavailableStatusline", () => {
       renderUnavailableStatusline("wezterm-pills"),
       "focus\tmarmonitor unavailable\t#bac2de\t#313244",
     );
+  });
+});
+
+describe("unmatched diagnostics output", () => {
+  it("shows unmatched reasons in status output", async () => {
+    const output = await captureConsoleLogs(async () => {
+      await printStatus([
+        {
+          pid: 12345,
+          agentName: "Codex",
+          cwd: "/Users/macrent/work/marmonitor",
+          cpuPercent: 0,
+          memoryMb: 120,
+          status: "Unmatched",
+          unmatchedReason: "startup_grace",
+        },
+      ]);
+    });
+
+    assert.match(output, /Unmatched Processes \(1\)/);
+    assert.match(output, /marmonitor/);
+    assert.match(output, /reason: starting up/);
+  });
+
+  it("shows unmatched reasons in clean plan output", async () => {
+    const output = await captureConsoleLogs(async () => {
+      printCleanPlan(
+        [
+          {
+            pid: 12345,
+            agentName: "Codex",
+            cwd: "/Users/macrent/work/marmonitor",
+            cpuPercent: 0,
+            memoryMb: 120,
+            status: "Unmatched",
+            unmatchedReason: "session_file_missing",
+          },
+        ],
+        false,
+      );
+    });
+
+    assert.match(output, /Cleanup candidates \(1\)/);
+    assert.match(output, /reason: session file missing/);
+  });
+
+  it("includes unmatched reasons in clean JSON output", async () => {
+    const output = await captureConsoleLogs(async () => {
+      printCleanJson(
+        [
+          {
+            pid: 12345,
+            agentName: "Codex",
+            cwd: "/Users/macrent/work/marmonitor",
+            cpuPercent: 0,
+            memoryMb: 120,
+            status: "Unmatched",
+            unmatchedReason: "ambiguous_match",
+          },
+        ],
+        false,
+      );
+    });
+
+    const parsed = JSON.parse(output);
+    assert.equal(parsed.targets[0].unmatchedReason, "ambiguous_match");
   });
 });
 
