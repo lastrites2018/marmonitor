@@ -1057,7 +1057,7 @@ program
         targetClient: opts.targetClient,
         insideTmux: true,
       });
-      if (!result.executed) {
+      if (!result.executed && !result.noop) {
         process.exit(1);
       }
       return;

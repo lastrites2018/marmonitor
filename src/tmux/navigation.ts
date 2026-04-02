@@ -4,11 +4,13 @@ import {
   type TmuxJumpBackResult,
   type TmuxJumpOptions,
   type TmuxJumpResult,
+  type TmuxJumpTarget,
   jumpBackToTmuxAnchor,
-  jumpToAgent,
+  jumpToTmuxPane,
   listTmuxClientIds,
   listTmuxPanes,
   resolveTmuxClientLocation,
+  resolveTmuxJumpTarget,
 } from "./index.js";
 import {
   type TmuxJumpAnchor,
@@ -18,8 +20,22 @@ import {
   writeJumpAnchor,
 } from "./jump-anchor.js";
 
-async function resolveOriginCwd(location: TmuxClientLocation): Promise<string | undefined> {
-  const panes = await listTmuxPanes();
+interface JumpNavigationDeps {
+  jumpToTmuxPane?: typeof jumpToTmuxPane;
+  listTmuxClientIds?: typeof listTmuxClientIds;
+  listTmuxPanes?: typeof listTmuxPanes;
+  pruneJumpAnchors?: typeof pruneJumpAnchors;
+  readJumpAnchor?: typeof readJumpAnchor;
+  resolveTmuxClientLocation?: typeof resolveTmuxClientLocation;
+  resolveTmuxJumpTarget?: typeof resolveTmuxJumpTarget;
+  writeJumpAnchor?: typeof writeJumpAnchor;
+}
+
+async function resolveOriginCwd(
+  location: TmuxClientLocation,
+  listPanes: typeof listTmuxPanes = listTmuxPanes,
+): Promise<string | undefined> {
+  const panes = await listPanes();
   return panes.find(
     (pane) =>
       pane.sessionName === location.sessionName &&
@@ -28,7 +44,10 @@ async function resolveOriginCwd(location: TmuxClientLocation): Promise<string | 
   )?.cwd;
 }
 
-async function buildJumpAnchor(location: TmuxClientLocation): Promise<TmuxJumpAnchor> {
+async function buildJumpAnchor(
+  location: TmuxClientLocation,
+  deps: JumpNavigationDeps = {},
+): Promise<TmuxJumpAnchor> {
   const now = Date.now();
   return {
     clientId: location.clientId,
@@ -36,7 +55,7 @@ async function buildJumpAnchor(location: TmuxClientLocation): Promise<TmuxJumpAn
     originSessionId: location.sessionId,
     originWindowId: location.windowId,
     originPaneId: location.paneId,
-    originCwd: await resolveOriginCwd(location),
+    originCwd: await resolveOriginCwd(location, deps.listTmuxPanes),
     recordedAt: now,
     lastJumpedAt: now,
   };
@@ -50,10 +69,58 @@ function touchJumpAnchor(anchor: TmuxJumpAnchor): TmuxJumpAnchor {
   };
 }
 
-async function pruneAnchorsBestEffort(): Promise<void> {
+function isSameTmuxPaneTarget(target: TmuxJumpTarget, location: TmuxClientLocation): boolean {
+  return (
+    target.pane.sessionName === location.sessionName &&
+    target.pane.windowIndex === location.windowIndex &&
+    target.pane.paneIndex === location.paneIndex
+  );
+}
+
+function buildJumpResult(
+  agent: Pick<AgentSession, "pid" | "cwd">,
+  target: TmuxJumpTarget | undefined,
+  options: TmuxJumpOptions,
+  executed: boolean,
+  noop = false,
+  message?: string,
+): TmuxJumpResult {
+  const insideTmux = options.insideTmux ?? Boolean(process.env.TMUX);
+  if (!target) {
+    return {
+      found: false,
+      executed: false,
+      insideTmux,
+      pid: agent.pid,
+      cwd: agent.cwd,
+      message: message ?? "No tmux pane matched this AI session.",
+    };
+  }
+
+  return {
+    found: true,
+    executed,
+    noop,
+    insideTmux,
+    pid: agent.pid,
+    match: target.match,
+    target: target.pane.target,
+    sessionName: target.pane.sessionName,
+    cwd: target.pane.cwd,
+    message:
+      message ??
+      (executed
+        ? `Switched to ${target.pane.target} via ${target.match}.`
+        : `Matched ${target.pane.target} via ${target.match}, but tmux switch failed.`),
+  };
+}
+
+async function pruneAnchorsBestEffort(deps: JumpNavigationDeps = {}): Promise<void> {
   try {
-    await pruneJumpAnchors({
-      activeClientIds: await listTmuxClientIds(),
+    const loadClientIds = deps.listTmuxClientIds ?? listTmuxClientIds;
+    const prune = deps.pruneJumpAnchors ?? pruneJumpAnchors;
+    await prune({
+      activeClientIds: await loadClientIds(),
     });
   } catch {
     // anchor cleanup must never block jump commands
@@ -63,18 +130,43 @@ async function pruneAnchorsBestEffort(): Promise<void> {
 export async function jumpToAgentWithAnchor(
   agent: Pick<AgentSession, "pid" | "cwd">,
   options: TmuxJumpOptions = {},
+  deps: JumpNavigationDeps = {},
 ): Promise<TmuxJumpResult> {
-  await pruneAnchorsBestEffort();
-  const origin = await resolveTmuxClientLocation(options);
-  const existingAnchor = origin ? await readJumpAnchor(origin.clientId) : undefined;
+  const resolveClientLocation = deps.resolveTmuxClientLocation ?? resolveTmuxClientLocation;
+  const readAnchor = deps.readJumpAnchor ?? readJumpAnchor;
+  const resolveJumpTarget = deps.resolveTmuxJumpTarget ?? resolveTmuxJumpTarget;
+  const executeJump = deps.jumpToTmuxPane ?? jumpToTmuxPane;
+  const persistAnchor = deps.writeJumpAnchor ?? writeJumpAnchor;
 
-  const result = await jumpToAgent(agent, options);
-  if (!result.executed || !origin) {
+  await pruneAnchorsBestEffort(deps);
+  const origin = await resolveClientLocation(options);
+  const existingAnchor = origin ? await readAnchor(origin.clientId) : undefined;
+  const target = await resolveJumpTarget(agent);
+  if (!target) {
+    return buildJumpResult(agent, undefined, options, false);
+  }
+
+  if (origin && isSameTmuxPaneTarget(target, origin)) {
+    return buildJumpResult(
+      agent,
+      target,
+      options,
+      true,
+      true,
+      `Already at ${target.pane.target}; jump-back anchor unchanged.`,
+    );
+  }
+
+  const executed = await executeJump(target, options);
+  const result = buildJumpResult(agent, target, options, executed);
+  if (!executed || !origin) {
     return result;
   }
 
-  const anchor = existingAnchor ? touchJumpAnchor(existingAnchor) : await buildJumpAnchor(origin);
-  await writeJumpAnchor(anchor);
+  const anchor = existingAnchor
+    ? touchJumpAnchor(existingAnchor)
+    : await buildJumpAnchor(origin, deps);
+  await persistAnchor(anchor);
   return result;
 }
 

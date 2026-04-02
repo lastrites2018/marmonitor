@@ -312,7 +312,7 @@ export async function runStatusClick(args: string[] = process.argv.slice(2)): Pr
     targetClient: options.targetClient,
     insideTmux: true,
   });
-  if (result.executed) {
+  if (result.executed || result.noop) {
     refreshTmuxClient(options.targetClient);
     return 0;
   }
